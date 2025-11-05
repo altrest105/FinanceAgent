@@ -3,6 +3,7 @@ from openai import OpenAI
 from tqdm import tqdm
 from dotenv import load_dotenv
 import os
+from retriever import build_prompt
 
 load_dotenv()
 LLM_API_KEY = os.getenv("LLM_API_KEY")
@@ -14,6 +15,9 @@ def answer_generation(question):
         base_url="https://ai-for-finance-hack.up.railway.app/",
         api_key=LLM_API_KEY,
     )
+
+    sys_prompt = build_prompt(question)
+
     response = client.chat.completions.create(
         model="openrouter/mistralai/mistral-small-3.2-24b-instruct",
         messages=[
@@ -22,7 +26,7 @@ def answer_generation(question):
                 "content": [
                     {
                         "type": "text",
-                        "text": f"Ответь на вопрос: {question}"
+                        "text": f"Ответь на вопрос: {sys_prompt}"
                     }
                 ]
             }

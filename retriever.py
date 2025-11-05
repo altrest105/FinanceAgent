@@ -50,7 +50,9 @@ def get_topk_texts(query: str, db_csv: str, embeddings_file: str, top_k: int = T
     l = len(context_text) / (num_tokens_from_string(context_text) / MAX_TOKENS_PROMT)
     return context_text[:int(l)]
 
-def build_prompt(query, docs):
+def build_prompt(query, csv_f = "new_train_data.csv", npy_f = "embeddings.npy"):
+    context_text = get_topk_texts(query, csv_f, npy_f, top_k=TOP_K)
+
     return  f"""
     Отвечай как профессиональный сотрудник банка, важно отвечать па основе контекста из базы знаний.
     Если у тебя недостаточно информации и речь идёт не о общеизвестных вещах, то тебе необходимо вежливо отказаться отвечать.
@@ -63,7 +65,7 @@ def build_prompt(query, docs):
     - Если не можешь ответить: "Извините, но сейчас я не могу дать ответ на ваш вопрос"
 
     Контекст из базы знаний: 
-    {docs}
+    {context_text}
     
     Вопрос клиента: {query}
     """
@@ -72,6 +74,5 @@ def build_prompt(query, docs):
 if __name__ == "__main__":
     # query = "Как изменение ключевой ставки влияет на цену облигации с фиксированной ставкой?"
     query = "Как опционные стратегии утилизируют деривативный лимит?"
-    context_text = get_topk_texts(query, "new_train_data.csv", "embeddings.npy", top_k=5)
-
-    sys_prompt = build_prompt(query, context_text)
+    
+    sys_prompt = build_prompt(query)
