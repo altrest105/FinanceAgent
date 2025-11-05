@@ -5,13 +5,14 @@ import numpy as np
 from tqdm import tqdm
 from openai import OpenAI
 from dotenv import load_dotenv
+from retriever import num_tokens_from_string
 
 tqdm.pandas()
 load_dotenv()
 
 EMBEDDER_API_KEY = os.getenv("EMBEDDER_API_KEY")
 SIMILARITY_THRESHOLD = 0.90
-MAX_TOKENS = 7000
+MAX_TOKENS = 8000
 
 STOP_WORDS = [
     "в данной статье", "рассказываем", "например", "также", "кстати", 
@@ -32,9 +33,10 @@ def shorten_text(text: str) -> str:
     for word in STOP_WORDS:
         text = text.replace(word, "")
     text = " ".join(text.split())
-    max_chars = MAX_TOKENS * 4
-    if len(text) > max_chars:
-        text = text[:max_chars]
+    tokens_n = num_tokens_from_string(text)
+    if tokens_n > MAX_TOKENS:
+        l = len(text) / (tokens_n / 8000)
+        new_text = text[:int(l)]
     return text
 
 def load_and_clean_data(file_path: str) -> pd.DataFrame:
