@@ -68,15 +68,19 @@ def load_and_clean_data(file_path: str) -> pd.DataFrame:
 
 def expand_into_chunks(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
+    global_chunk_id = 0
     for _, row in tqdm(df.iterrows(), total=len(df)):
         chunks = split_by_sections(row["text"])
-        for i, chunk in enumerate(chunks):
+        if not chunks:
+            chunks = [row["text"]]
+        for chunk in chunks:
             rows.append({
                 "annotation": row["annotation"],
                 "tags": row["tags"],
                 "text_chunk": chunk,
-                "chunk_id": i
+                "chunk_id": global_chunk_id
             })
+            global_chunk_id += 1
     return pd.DataFrame(rows)
 
 def add_embeddings(df: pd.DataFrame, client: OpenAI) -> pd.DataFrame:
