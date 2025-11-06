@@ -3,9 +3,12 @@ from openai import OpenAI
 from tqdm import tqdm
 from dotenv import load_dotenv
 import os
-from retriever import build_prompt
+# from retriever import build_prompt
 
 load_dotenv()
+# MODEL_NAME = "openrouter/google/gemma-3-27b-it"
+MODEL_NAME = "openrouter/x-ai/grok-3-mini"
+# MODEL_NAME = "openrouter/mistralai/mistral-small-3.2-24b-instruct"
 LLM_API_KEY = os.getenv("LLM_API_KEY")
 EMBEDDER_API_KEY = os.getenv("EMBEDDER_API_KEY")
 
@@ -16,10 +19,10 @@ def answer_generation(question):
         api_key=LLM_API_KEY,
     )
 
-    sys_prompt = build_prompt(question)
+    sys_prompt = question #build_prompt(question)
 
     response = client.chat.completions.create(
-        model="openrouter/mistralai/mistral-small-3.2-24b-instruct",
+        model= MODEL_NAME,
         messages=[
             {
                 "role": "user",
