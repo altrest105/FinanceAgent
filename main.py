@@ -14,7 +14,7 @@ EMBEDDER_API_KEY = os.getenv("EMBEDDER_API_KEY")
 
 TOP_K = 2 # Количество контекстов для генерации ответа
 TOP_K_BEFORE_RERANK = 20 # Количество кандидатов для реранкера
-LLM_MODEL = "openrouter/google/gemma-3-27b-it" # Модель для генерации ответов openrouter/google/gemma-3-27b-it openrouter/mistralai/mistral-small-3.2-24b-instruct
+LLM_MODEL = "openrouter/mistralai/mistral-small-3.2-24b-instruct" # Модель для генерации ответов openrouter/google/gemma-3-27b-it openrouter/mistralai/mistral-small-3.2-24b-instruct
 EMBEDDING_MODEL = "text-embedding-3-small" # Модель для эмбеддингов
 RERANK_MODEL = "deepinfra/Qwen/Qwen3-Reranker-4B" # Модель для реранкинга
 BATCH_SIZE = 100  # Размер батча для получения эмбеддингов
