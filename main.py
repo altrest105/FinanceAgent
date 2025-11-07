@@ -1,35 +1,219 @@
 import pandas as pd
+import numpy as np
+import os
+import requests
+import faiss
 from openai import OpenAI
 from tqdm import tqdm
 from dotenv import load_dotenv
-import os
-# from retriever import build_prompt
-
 load_dotenv()
-# MODEL_NAME = "openrouter/google/gemma-3-27b-it"
-MODEL_NAME = "openrouter/x-ai/grok-3-mini"
-# MODEL_NAME = "openrouter/mistralai/mistral-small-3.2-24b-instruct"
+
 LLM_API_KEY = os.getenv("LLM_API_KEY")
 EMBEDDER_API_KEY = os.getenv("EMBEDDER_API_KEY")
 
+TOP_K = 3 # Количество контекстов для генерации ответа
+TOP_K_BEFORE_RERANK = 20 # Количество кандидатов для реранкера
+LLM_MODEL = "openrouter/x-ai/grok-3-mini" # Модель для генерации ответов
+EMBEDDING_MODEL = "text-embedding-3-small" # Модель для эмбеддингов
+RERANK_MODEL = "deepinfra/Qwen/Qwen3-Reranker-4B" # Модель для реранкинга
+BATCH_SIZE = 100  # Размер батча для получения эмбеддингов
 
+# --- Эмбеддинг ---
+# Функция разбиения текста на чанки по ##
+def split_by_sections(text):
+    if pd.isna(text) or not text.strip():
+        return []
+    parts = [t.strip() for t in text.split("##") if t.strip()]
+    return parts if parts else [text]
+
+# Функция получения эмбеддингов батчами
+def get_embeddings_batch(client, texts):
+    """Получение эмбеддингов для батча текстов"""
+    if not texts:
+        return []
+    try:
+        response = client.embeddings.create(
+            model=EMBEDDING_MODEL,
+            input=texts
+        )
+        return [item.embedding for item in response.data]
+    except Exception as e:
+        print(f"⚠️ Ошибка при получении эмбеддингов: {e}")
+        return [None] * len(texts)
+
+# Функция подготовки эмбеддингов
+def process_knowledge_base(input_file, output_csv, embeddings_file):
+    print(f"🔄 Загрузка данных из {input_file}...")
+    df = pd.read_csv(input_file)
+    
+    required_cols = {"id", "annotation", "tags", "text"}
+    if not required_cols.issubset(df.columns):
+        raise ValueError(f"CSV должен содержать колонки: {required_cols}")
+    
+    print(f"✅ Загружено {len(df)} документов")
+    
+    rows = []
+    global_chunk_id = 0
+    
+    print("🔄 Разбиение на чанки по ##...")
+    for _, row in tqdm(df.iterrows(), total=len(df), desc="Разбиение"):
+        chunks = split_by_sections(row["text"])
+        
+        for chunk_idx, chunk in enumerate(chunks):
+            rows.append({
+                "doc_id": row["id"],
+                "annotation": row["annotation"],
+                "tags": row["tags"],
+                "text_chunk": chunk,
+                "chunk_id": global_chunk_id,
+                "chunk_idx_in_doc": chunk_idx
+            })
+            global_chunk_id += 1
+    
+    df_chunks = pd.DataFrame(rows)
+    print(f"✅ Создано {len(df_chunks)} чанков из {len(df)} документов")
+    
+    client = OpenAI(
+        base_url="https://ai-for-finance-hack.up.railway.app/",
+        api_key=EMBEDDER_API_KEY,
+    )
+    
+    all_embeddings = []
+    texts = df_chunks["text_chunk"].tolist()
+    
+    print(f"🔄 Получение эмбеддингов для {len(texts)} чанков батчами по {BATCH_SIZE}...")
+    for i in tqdm(range(0, len(texts), BATCH_SIZE), desc="Эмбеддинги"):
+        batch = texts[i:i + BATCH_SIZE]
+        embeddings = get_embeddings_batch(client, batch)
+        all_embeddings.extend(embeddings)
+    
+    df_chunks["embedding"] = all_embeddings
+    
+    df_valid = df_chunks[df_chunks["embedding"].notnull()].reset_index(drop=True)
+    
+    if len(df_valid) < len(df_chunks):
+        print(f"⚠️ Предупреждение: {len(df_chunks) - len(df_valid)} чанков не получили эмбеддинги")
+
+    np.save(embeddings_file, np.array(df_valid["embedding"].tolist()))
+    df_valid.drop(columns=["embedding"]).to_csv(output_csv, index=False, encoding="utf-8")
+
+    print(f"✅ Всего строк: {len(df_valid)}")
+
+# --- Retriever с FAISS и реранкером ---
+class KnowledgeBaseRetriever:
+    def __init__(self, db_csv, embeddings_file):
+        print("🔄 Загрузка базы знаний в память...")
+        self.df = pd.read_csv(db_csv)
+        self.texts = self.df["text_chunk"].fillna("").tolist()
+        
+        # Загружаем эмбеддинги и создаем FAISS индекс
+        embeddings = np.load(embeddings_file).astype('float32')
+        
+        # Нормализуем для косинусного расстояния
+        faiss.normalize_L2(embeddings)
+        
+        # Создаем FAISS индекс для быстрого поиска
+        dimension = embeddings.shape[1]
+        self.index = faiss.IndexFlatIP(dimension)
+        self.index.add(embeddings)
+        
+        self.client = OpenAI(
+            base_url="https://ai-for-finance-hack.up.railway.app/",
+            api_key=EMBEDDER_API_KEY,
+        )
+        print(f"✅ База загружена: {len(self.texts)} чанков, FAISS индекс создан")
+    
+    def compute_query_embedding(self, query):
+        response = self.client.embeddings.create(
+            model=EMBEDDING_MODEL, 
+            input=query
+        )
+        embedding = np.array(response.data[0].embedding).astype('float32').reshape(1, -1)
+        faiss.normalize_L2(embedding)
+        return embedding
+    
+    def rerank_docs(self, query, documents):
+        url = "https://ai-for-finance-hack.up.railway.app/rerank"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {EMBEDDER_API_KEY}"
+        }
+        payload = {
+            "model": RERANK_MODEL,
+            "query": query,
+            "documents": documents
+        }
+        
+        try:
+            response = requests.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"⚠️ Ошибка при реранжировании: {e}")
+            return None
+    
+    def get_topk_contexts(self, query):
+        query_emb = self.compute_query_embedding(query)
+        similarities, indices = self.index.search(query_emb, TOP_K_BEFORE_RERANK)
+        
+        candidate_texts = [self.texts[idx] for idx in indices[0]]
+        
+        rerank_result = self.rerank_docs(query, candidate_texts)
+        
+        if rerank_result and 'results' in rerank_result:
+            sorted_results = sorted(
+                rerank_result['results'], 
+                key=lambda x: x.get('relevance_score', 0), 
+                reverse=True
+            )[:TOP_K]
+            
+            top_contexts = [candidate_texts[item['index']] for item in sorted_results]
+        else:
+            print("⚠️ Реранкер недоступен, используем FAISS поиск")
+            top_contexts = candidate_texts[:TOP_K]
+        
+        return top_contexts
+
+# --- Генерация ответа ---
+# Функция построения запроса к LLM для генерации ответа
+def build_answer(question, contexts):
+    contexts = retriever.get_topk_contexts(question)
+
+    context_text = "\n\n---\n\n".join(contexts)
+    text = f"""Ты профессиональный сотрудник банка. Отвечай только на основе предоставленного контекста.
+
+    Контекст из базы знаний:
+    {context_text}
+    Вопрос клиента: {question}
+
+    Правила ответа:
+    - Отвечай строго на вопрос, без вводных слов
+    - Ответ должен быть монолитным текстом, без списков
+    - Избегай жаргона
+    - Приводи 1-2 примера для сложных тем
+    - Если не знаешь ответа: "Извините, но сейчас я не могу дать ответ на ваш вопрос"
+    """
+
+    return text
+
+# Функция генерации ответа на вопрос
 def answer_generation(question):
     client = OpenAI(
         base_url="https://ai-for-finance-hack.up.railway.app/",
         api_key=LLM_API_KEY,
     )
 
-    sys_prompt = question #build_prompt(question)
+    question_text = build_answer(question, [])
 
     response = client.chat.completions.create(
-        model= MODEL_NAME,
+        model=LLM_MODEL,
         messages=[
             {
                 "role": "user",
                 "content": [
                     {
                         "type": "text",
-                        "text": f"Ответь на вопрос: {sys_prompt}"
+                        "text": question_text
                     }
                 ]
             }
@@ -38,7 +222,26 @@ def answer_generation(question):
     return response.choices[0].message.content
 
 
-if __name__ == "__main__":    
+# --- Основной запуск ---
+if __name__ == "__main__":   
+    # Создание эмбеддинга
+    if not os.path.exists("new_train_data.csv") or not os.path.exists("embeddings.npy"):
+        print("🔄 Создание базы знаний...")
+        process_knowledge_base(
+            input_file="train_data.csv",
+            output_csv="new_train_data.csv",
+            embeddings_file="embeddings.npy"
+        )
+    else:
+        print("⚠️ База знаний уже существует, пропускаем создание")
+
+    # Инициализация ретривера
+    retriever = KnowledgeBaseRetriever(
+        db_csv="new_train_data.csv",
+        embeddings_file="embeddings.npy"
+    )
+
+    # Генерация и сохранение ответов на вопросы из questions.csv
     questions = pd.read_csv('./questions.csv')
     questions_list = questions['Вопрос'].tolist()
     answer_list = []
@@ -47,3 +250,4 @@ if __name__ == "__main__":
         answer_list.append(answer)
     questions['Ответы на вопрос'] = answer_list
     questions.to_csv('submission.csv', index=False)
+    print("✅ Ответы сохранены в submission.csv")
