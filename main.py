@@ -3,6 +3,7 @@ import numpy as np
 import os
 import requests
 import faiss
+import time
 from openai import OpenAI
 from tqdm import tqdm
 from dotenv import load_dotenv
@@ -11,9 +12,9 @@ load_dotenv()
 LLM_API_KEY = os.getenv("LLM_API_KEY")
 EMBEDDER_API_KEY = os.getenv("EMBEDDER_API_KEY")
 
-TOP_K = 3 # Количество контекстов для генерации ответа
+TOP_K = 2 # Количество контекстов для генерации ответа
 TOP_K_BEFORE_RERANK = 20 # Количество кандидатов для реранкера
-LLM_MODEL = "openrouter/x-ai/grok-3-mini" # Модель для генерации ответов
+LLM_MODEL = "openrouter/google/gemma-3-27b-it" # Модель для генерации ответов openrouter/google/gemma-3-27b-it openrouter/mistralai/mistral-small-3.2-24b-instruct
 EMBEDDING_MODEL = "text-embedding-3-small" # Модель для эмбеддингов
 RERANK_MODEL = "deepinfra/Qwen/Qwen3-Reranker-4B" # Модель для реранкинга
 BATCH_SIZE = 100  # Размер батча для получения эмбеддингов
@@ -152,60 +153,69 @@ class KnowledgeBaseRetriever:
             print(f"⚠️ Ошибка при реранжировании: {e}")
             return None
     
-    def get_topk_contexts(self, query):
+    def get_topk_contexts(self, query, max_retries=3, retry_delay=1.5):
         query_emb = self.compute_query_embedding(query)
         similarities, indices = self.index.search(query_emb, TOP_K_BEFORE_RERANK)
         
         candidate_texts = [self.texts[idx] for idx in indices[0]]
-        
-        rerank_result = self.rerank_docs(query, candidate_texts)
-        
-        if rerank_result and 'results' in rerank_result:
+
+        # --- Попытки реранкера ---
+        rerank_result = None
+        for attempt in range(1, max_retries + 1):
+            rerank_result = self.rerank_docs(query, candidate_texts)
+
+            if rerank_result and "results" in rerank_result:
+                break  # Успешно → выходим
+
+            print(f"⚠️ Реранкер недоступен (попытка {attempt}/{max_retries})")
+            time.sleep(retry_delay * attempt)  # экспоненциальная задержка
+
+        # --- Если реранкер сработал ---
+        if rerank_result and "results" in rerank_result:
             sorted_results = sorted(
-                rerank_result['results'], 
-                key=lambda x: x.get('relevance_score', 0), 
+                rerank_result["results"],
+                key=lambda x: x.get("relevance_score", 0),
                 reverse=True
             )[:TOP_K]
-            
-            top_contexts = [candidate_texts[item['index']] for item in sorted_results]
-        else:
-            print("⚠️ Реранкер недоступен, используем FAISS поиск")
-            top_contexts = candidate_texts[:TOP_K]
+
+            top_contexts = [candidate_texts[item["index"]] for item in sorted_results]
         
+        else:
+            print("⚠️ Реранкер не сработал после всех попыток → используем FAISS поиск")
+            top_contexts = candidate_texts[:TOP_K]
+
         return top_contexts
 
 # --- Генерация ответа ---
 # Функция построения запроса к LLM для генерации ответа
-def build_answer(question, contexts):
+def build_answer(question):
     contexts = retriever.get_topk_contexts(question)
 
     context_text = "\n\n---\n\n".join(contexts)
-    text = f"""Ты профессиональный сотрудник банка. Отвечай только на основе предоставленного контекста.
+    text = f"""Ты профессиональный банковский консультант. Отвечай строго и только по приведённому контексту.
 
-    Контекст из базы знаний:
+    Контекст:
     {context_text}
+
     Вопрос клиента: {question}
 
     Правила ответа:
+    - Запрещено добавлять предположения
+    - Запрещено использовать внешние знания
+    - Запрещено придумывать детали
     - Отвечай строго на вопрос, без вводных слов
     - Ответ должен быть монолитным текстом, без списков
-    - Избегай жаргона
     - Приводи 1-2 примера для сложных тем
-    - Если не знаешь ответа: "Извините, но сейчас я не могу дать ответ на ваш вопрос"
+    - Если информации в контексте недостаточно — скажи: "Извините, но сейчас я не могу дать ответ на ваш вопрос"
     """
 
     return text
 
 # Функция генерации ответа на вопрос
-def answer_generation(question):
-    client = OpenAI(
-        base_url="https://ai-for-finance-hack.up.railway.app/",
-        api_key=LLM_API_KEY,
-    )
+def answer_generation(question, client_ans):
+    question_text = build_answer(question)
 
-    question_text = build_answer(question, [])
-
-    response = client.chat.completions.create(
+    response = client_ans.chat.completions.create(
         model=LLM_MODEL,
         messages=[
             {
@@ -245,9 +255,15 @@ if __name__ == "__main__":
     questions = pd.read_csv('./questions.csv')
     questions_list = questions['Вопрос'].tolist()
     answer_list = []
+
+    client_ans = OpenAI(
+        base_url="https://ai-for-finance-hack.up.railway.app/",
+        api_key=LLM_API_KEY,
+    )
+
     for current_question in tqdm(questions_list, desc="Генерация ответов"):
-        answer = answer_generation(question=current_question)
-        answer_list.append(answer)
+        answer = answer_generation(question=current_question, client_ans=client_ans)
+        answer_list.append(answer.replace('\n', ' ').strip())
     questions['Ответы на вопрос'] = answer_list
     questions.to_csv('submission.csv', index=False)
     print("✅ Ответы сохранены в submission.csv")
