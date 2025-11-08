@@ -163,7 +163,7 @@ class KnowledgeBaseRetriever:
             print(f"⚠️ Ошибка при реранжировании: {e}")
             return None
     
-    def get_topk_contexts(self, query, repeat, max_retries=3, retry_delay=1.5):
+    def get_topk_contexts(self, query, repeat, max_retries=3, retry_delay=5):
         query_emb = self.compute_query_embedding(query)
         similarities, indices = self.index.search(query_emb, TOP_K_BEFORE_RERANK)
         
@@ -178,7 +178,7 @@ class KnowledgeBaseRetriever:
                 break  # Успешно → выходим
 
             print(f"⚠️ Реранкер недоступен (попытка {attempt}/{max_retries})")
-            time.sleep(retry_delay * attempt)  # экспоненциальная задержка
+            time.sleep(retry_delay)  # экспоненциальная задержка
 
         if (repeat):
             # --- Если реранкер сработал ---
