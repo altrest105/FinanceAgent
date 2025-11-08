@@ -7,26 +7,27 @@ import time
 from openai import OpenAI
 from tqdm import tqdm
 from dotenv import load_dotenv
-load_dotenv()
-
 import tiktoken
 
-def num_tokens_from_string(string: str, encoding_name = "cl100k_base") -> int:
-    encoding = tiktoken.get_encoding(encoding_name)
-    num_tokens = len(encoding.encode(string))
-
-    return num_tokens
+load_dotenv()
 
 LLM_API_KEY = os.getenv("LLM_API_KEY")
 EMBEDDER_API_KEY = os.getenv("EMBEDDER_API_KEY")
 
 TOP_K = 2 # Количество контекстов для генерации ответа
-TOP_K_LOCAL = 4 # Количество контекстов для повторной генерации ответа
+TOP_K_GLOBAL = 4 # Количество контекстов для повторной генерации ответа
 TOP_K_BEFORE_RERANK = 20 # Количество кандидатов для реранкера
 LLM_MODEL = "openrouter/mistralai/mistral-small-3.2-24b-instruct" # Модель для генерации ответов openrouter/google/gemma-3-27b-it openrouter/mistralai/mistral-small-3.2-24b-instruct
 EMBEDDING_MODEL = "text-embedding-3-small" # Модель для эмбеддингов
 RERANK_MODEL = "deepinfra/Qwen/Qwen3-Reranker-4B" # Модель для реранкинга
 BATCH_SIZE = 100  # Размер батча для получения эмбеддингов
+
+# --- Тест числа токенов ---
+def num_tokens_from_string(string: str, encoding_name = "cl100k_base") -> int:
+    encoding = tiktoken.get_encoding(encoding_name)
+    num_tokens = len(encoding.encode(string))
+
+    return num_tokens
 
 # --- Эмбеддинг ---
 # Функция разбиения текста на чанки по ##
@@ -200,13 +201,13 @@ class KnowledgeBaseRetriever:
                     rerank_result["results"],
                     key=lambda x: x.get("relevance_score", 0),
                     reverse=True
-                )[:TOP_K_LOCAL]
+                )[:TOP_K_GLOBAL]
 
                 top_contexts = [candidate_texts[item["index"]] for item in sorted_results]
             
             else:
                 print("⚠️ Реранкер не сработал после всех попыток → используем FAISS поиск")
-                top_contexts = candidate_texts[:TOP_K_LOCAL]
+                top_contexts = candidate_texts[:TOP_K_GLOBAL]
 
         return top_contexts
 
@@ -217,8 +218,6 @@ def build_answer(question, repeat):
 
     context_text = "\n\n---\n\n".join(contexts)
     
-    # print(context_text)
-    # print('----------->', num_tokens_from_string(context_text))
     text = f"""Ты профессиональный банковский консультант. Отвечай строго и только по приведённому контексту.
 
     Контекст:
@@ -244,6 +243,9 @@ def build_answer(question, repeat):
 def answer_generation(question, client_ans, repeat = True):
     question_text = build_answer(question, repeat)
 
+    if (num_tokens_from_string(question_text) > 8000):
+        return "Извините, но сейчас я не могу дать ответ на ваш вопрос"
+    
     response = client_ans.chat.completions.create(
         model=LLM_MODEL,
         messages=[
@@ -272,8 +274,7 @@ if __name__ == "__main__":
             embeddings_file="embeddings.npy"
         )
     else:
-        pass
-        # print("⚠️ База знаний уже существует, пропускаем создание")
+        print("⚠️ База знаний уже существует, пропускаем создание")
 
     # Инициализация ретривера
     retriever = KnowledgeBaseRetriever(
@@ -291,26 +292,22 @@ if __name__ == "__main__":
         api_key=LLM_API_KEY,
     )
 
-    # for current_question in tqdm(questions_list, desc="Генерация ответов"):
-    #     answer = answer_generation(question=current_question, client_ans=client_ans)
-    #     answer_list.append(answer.replace('\n', ' ').strip())
-    # questions['Ответы на вопрос'] = answer_list
-    # questions.to_csv('submission.csv', index=False)
-    # print("✅ Ответы сохранены в submission.csv")
+    for current_question in tqdm(questions_list, desc="Генерация ответов"):
+        answer = answer_generation(question=current_question, client_ans=client_ans)
+        while ("Извините, но сейчас я не могу дать ответ на ваш вопрос" in answer):
+            answer = answer_generation(question=current_question, client_ans=client_ans, repeat = False)
+            TOP_K_GLOBAL +=1
+
+        answer_list.append(answer.replace('\n', ' ').strip())
+    questions['Ответы на вопрос'] = answer_list
+    questions.to_csv('submission.csv', index=False)
+    print("✅ Ответы сохранены в submission.csv")
 
     
     # # Mistral
-    q = '152,Чем отличается порог выручки для обязательного приема карт «Мир» от максимальной суммы «закупки с полки» по 223‑ФЗ?'
+    # q = '152,Чем отличается порог выручки для обязательного приема карт «Мир» от максимальной суммы «закупки с полки» по 223‑ФЗ?'
     # q = '310,Почему массовая рассылка заявок снижает шансы на одобрение?,"Извините, но сейчас я не могу дать ответ на ваш вопрос.'
 
     # q = '69,Какие лимиты действуют для бесплатных переводов по СБП по сравнению с кэшаутом?'
     # q = '145,Как соотносится лимит суммы по кредитным каникулам для потребительских займов с максимальным размером кредита по семейной ипотеке?'
-    # q = '245,Куда обращаться при споре со страховщиком по ИСЖ и по ОСАГО?'
-
-    answer = answer_generation(question=q, client_ans=client_ans)
-    while ("Извините, но сейчас я не могу дать ответ на ваш вопрос" in answer):
-        print("1")
-        answer = answer_generation(question=q, client_ans=client_ans, repeat = False)
-        TOP_K_LOCAL +=1
-
-    print("\n\n\n", answer)
+    # q = '245,Куда обращаться при споре со страховщиком по ИСЖ и по ОСАГО?')
