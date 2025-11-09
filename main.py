@@ -4,7 +4,7 @@ import os
 import requests
 import faiss
 import time
-from openai import OpenAI
+from openai import OpenAI, RateLimitError, APIError
 from tqdm import tqdm
 from dotenv import load_dotenv
 import tiktoken
@@ -247,22 +247,42 @@ def answer_generation(question, client_ans, repeat = True):
 
     if (num_tokens_from_string(question_text) > 8000):
         return "Извините, но сейчас я не могу дать ответ на ваш вопрос"
-    
-    response = client_ans.chat.completions.create(
-        model=LLM_MODEL,
-        messages=[
-            {
-                "role": "user",
-                "content": [
+
+    MAX_RETRIES = 3
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = client_ans.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[
                     {
-                        "type": "text",
-                        "text": question_text
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": question_text}
+                        ]
                     }
                 ]
-            }
-        ]
-    )
-    return response.choices[0].message.content
+            )
+
+            if response and response.choices and response.choices[0].message.content:
+                return response.choices[0].message.content.strip()
+            else:
+                return "Извините, но сейчас я не могу дать ответ на ваш вопрос"
+
+        except RateLimitError:
+            print(f"Повтор через 5 секунд")
+            time.sleep(5)
+            continue
+
+        except APIError as e:
+            print(f"Ошибка API: {e}")
+            time.sleep(5)
+            continue
+
+        except Exception as e:
+            print(f"Ошибка: {e}")
+            break
+
+    return "Извините, но сейчас я не могу дать ответ на ваш вопрос"
 
 
 # --- Основной запуск ---
@@ -295,6 +315,7 @@ if __name__ == "__main__":
     )
 
     for current_question in tqdm(questions_list, desc="Генерация ответов"):
+        TOP_K_GLOBAL = 4
         answer = answer_generation(question=current_question, client_ans=client_ans)
         while ("Извините, но сейчас я не могу дать ответ на ваш вопрос." in answer):
             print("Новый запрос")
