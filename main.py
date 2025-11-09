@@ -285,7 +285,7 @@ if __name__ == "__main__":
     )
 
     # Генерация и сохранение ответов на вопросы из questions.csv
-    questions = pd.read_csv('./q50.csv', encoding="utf-8")
+    questions = pd.read_csv('./questions.csv', encoding="utf-8")
     questions_list = questions['Вопрос'].tolist()
     answer_list = []
 
