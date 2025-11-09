@@ -322,13 +322,13 @@ if __name__ == "__main__":
 
     for current_question in tqdm(questions_list, desc="Генерация ответов"):
         answer = answer_generation(question=current_question, client_ans=client_ans)
-        while ("Извините" in answer):
-            print("Новый запрос")
+        attempts = 1
+        while ("Извините" in answer) and (attempts <= 5):
+            print(f"⚠️ Удовлетворительный ответ не получен (попытка {attempts}/5)")
+            RANKS = {'1': 8, '2': 4, '3': 4, '4': 16, '5': 16}
+            TOP_K_GLOBAL = RANKS.get(str(attempts), 4)
             answer = answer_generation(question=current_question, client_ans=client_ans, repeat = False)
-            if (TOP_K_GLOBAL == 32):
-                TOP_K_GLOBAL = 16
-                break
-            TOP_K_GLOBAL *= 2
+            attempts += 1
 
         answer_list.append(answer.strip())
     questions['Ответы на вопрос'] = answer_list
