@@ -4,20 +4,30 @@ import os
 import requests
 import faiss
 import time
-from openai import OpenAI
+from openai import OpenAI, RateLimitError, APIError
 from tqdm import tqdm
 from dotenv import load_dotenv
+import tiktoken
+
 load_dotenv()
 
 LLM_API_KEY = os.getenv("LLM_API_KEY")
 EMBEDDER_API_KEY = os.getenv("EMBEDDER_API_KEY")
 
 TOP_K = 2 # Количество контекстов для генерации ответа
+TOP_K_GLOBAL = 4 # Количество контекстов для повторной генерации ответа
 TOP_K_BEFORE_RERANK = 20 # Количество кандидатов для реранкера
 LLM_MODEL = "openrouter/mistralai/mistral-small-3.2-24b-instruct" # Модель для генерации ответов openrouter/google/gemma-3-27b-it openrouter/mistralai/mistral-small-3.2-24b-instruct
 EMBEDDING_MODEL = "text-embedding-3-small" # Модель для эмбеддингов
 RERANK_MODEL = "deepinfra/Qwen/Qwen3-Reranker-4B" # Модель для реранкинга
 BATCH_SIZE = 100  # Размер батча для получения эмбеддингов
+
+# --- Тест числа токенов ---
+def num_tokens_from_string(string: str, encoding_name = "cl100k_base") -> int:
+    encoding = tiktoken.get_encoding(encoding_name)
+    num_tokens = len(encoding.encode(string))
+
+    return num_tokens
 
 # --- Эмбеддинг ---
 # Функция разбиения текста на чанки по ##
@@ -153,7 +163,7 @@ class KnowledgeBaseRetriever:
             print(f"⚠️ Ошибка при реранжировании: {e}")
             return None
     
-    def get_topk_contexts(self, query, max_retries=3, retry_delay=1.5):
+    def get_topk_contexts(self, query, repeat, max_retries=3, retry_delay=5):
         query_emb = self.compute_query_embedding(query)
         similarities, indices = self.index.search(query_emb, TOP_K_BEFORE_RERANK)
         
@@ -170,73 +180,116 @@ class KnowledgeBaseRetriever:
             print(f"⚠️ Реранкер недоступен (попытка {attempt}/{max_retries})")
             time.sleep(retry_delay * attempt)  # экспоненциальная задержка
 
-        # --- Если реранкер сработал ---
-        if rerank_result and "results" in rerank_result:
-            sorted_results = sorted(
-                rerank_result["results"],
-                key=lambda x: x.get("relevance_score", 0),
-                reverse=True
-            )[:TOP_K]
+        if (repeat):
+            # --- Если реранкер сработал ---
+            if rerank_result and "results" in rerank_result:
+                sorted_results = sorted(
+                    rerank_result["results"],
+                    key=lambda x: x.get("relevance_score", 0),
+                    reverse=True
+                )[:TOP_K]
 
-            top_contexts = [candidate_texts[item["index"]] for item in sorted_results]
-        
+                top_contexts = [candidate_texts[item["index"]] for item in sorted_results]
+            
+            else:
+                print("⚠️ Реранкер не сработал после всех попыток → используем FAISS поиск")
+                top_contexts = candidate_texts[:TOP_K]
         else:
-            print("⚠️ Реранкер не сработал после всех попыток → используем FAISS поиск")
-            top_contexts = candidate_texts[:TOP_K]
+            # --- Если реранкер сработал ---
+            if rerank_result and "results" in rerank_result:
+                sorted_results = sorted(
+                    rerank_result["results"],
+                    key=lambda x: x.get("relevance_score", 0),
+                    reverse=True
+                )[:TOP_K_GLOBAL]
+
+                top_contexts = [candidate_texts[item["index"]] for item in sorted_results]
+            
+            else:
+                print("⚠️ Реранкер не сработал после всех попыток → используем FAISS поиск")
+                top_contexts = candidate_texts[:TOP_K_GLOBAL]
 
         return top_contexts
 
 # --- Генерация ответа ---
 # Функция построения запроса к LLM для генерации ответа
-def build_answer(question):
-    contexts = retriever.get_topk_contexts(question)
+def build_answer(question, repeat):
+    contexts = retriever.get_topk_contexts(question, repeat = repeat)
 
     context_text = "\n\n---\n\n".join(contexts)
-    text = f"""Ты профессиональный банковский консультант. Отвечай строго и только по приведённому контексту.
+    
+    text = f"""Ты — русскоязычный ИИ-ассистент, эксперт в области финансов, права и государственных услуг.
 
+    Твоя задача — дать подробный, структурированный и максимально полезный ответ на вопрос пользователя. Ты должен основываться строго на предоставленном тебе контексте (документах из базы знаний).
+
+    ## Правила твоего ответа:
+    -  Главный заголовок: Начинай ответ с основного заголовка, используя ###.
+    -  Подзаголовки: Разбивай сложные ответы на логические блоки с помощью подзаголовков ####.
+    -  Списки: Используй маркированные списки (- или *) для перечислений, шагов или ключевых моментов.
+    -  Выделение: Выделяй ключевые термины, определения и важные цифры жирным шрифтом (**...**).
+    -  Синтез, не копирование: Не копируй текст из контекста слово в слово. Твоя цель — синтезировать информацию из разных частей контекста и изложить ее в виде единого, связного и легко читаемого ответа.
+    -  Полнота ответа: Убедись, что ты ответил на все части вопроса пользователя, если информация есть в контексте.
+    -  Ограничения: Отвечай только на основе предоставленного контекста. Не придумывай информацию и не используй свои общие знания.
+    -  Если в вопросе присутствует сравнение, но в контексте недостаточно информации, в конце сообщения пиши "Извините, но сейчас я не могу дать ответ на ваш вопрос."
+    -  Если ответа нет: Если в контексте нет релевантной информации для ответа на вопрос, вежливо сообщи: "Извините, но сейчас я не могу дать ответ на ваш вопрос."
+    
     Контекст:
     {context_text}
 
     Вопрос клиента: {question}
-
-    Правила ответа:
-    - Запрещено добавлять предположения
-    - Запрещено использовать внешние знания
-    - Запрещено придумывать детали
-    - Отвечай строго на вопрос, без вводных слов
-    - Ответ должен быть монолитным текстом, без списков
-    - Приводи 1-2 примера для сложных тем
-    - Если информации в контексте недостаточно — скажи: "Извините, но сейчас я не могу дать ответ на ваш вопрос"
     """
 
     return text
 
 # Функция генерации ответа на вопрос
-def answer_generation(question, client_ans):
-    question_text = build_answer(question)
+def answer_generation(question, client_ans, repeat = True):
+    question_text = build_answer(question, repeat)
 
-    response = client_ans.chat.completions.create(
-        model=LLM_MODEL,
-        messages=[
-            {
-                "role": "user",
-                "content": [
+    if (num_tokens_from_string(question_text) > 8000):
+        return "Извините, но сейчас я не могу дать ответ на ваш вопрос"
+
+    MAX_RETRIES = 3
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = client_ans.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[
                     {
-                        "type": "text",
-                        "text": question_text
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": question_text}
+                        ]
                     }
                 ]
-            }
-        ]
-    )
-    return response.choices[0].message.content
+            )
+
+            if response and response.choices and response.choices[0].message.content:
+                return response.choices[0].message.content.strip()
+            else:
+                return "Извините, но сейчас я не могу дать ответ на ваш вопрос"
+
+        except RateLimitError:
+            print(f"Повтор через 5 секунд")
+            time.sleep(5)
+            continue
+
+        except APIError as e:
+            print(f"Ошибка API: {e}")
+            time.sleep(5)
+            continue
+
+        except Exception as e:
+            print(f"Ошибка: {e}")
+            break
+
+    return "Извините, но сейчас я не могу дать ответ на ваш вопрос"
 
 
 # --- Основной запуск ---
 if __name__ == "__main__":   
     # Создание эмбеддинга
     if not os.path.exists("new_train_data.csv") or not os.path.exists("embeddings.npy"):
-        print("🔄 Создание базы знаний...")
+        # print("🔄 Создание базы знаний...")
         process_knowledge_base(
             input_file="train_data.csv",
             output_csv="new_train_data.csv",
@@ -252,7 +305,7 @@ if __name__ == "__main__":
     )
 
     # Генерация и сохранение ответов на вопросы из questions.csv
-    questions = pd.read_csv('./questions.csv')
+    questions = pd.read_csv('./questions.csv', encoding="utf-8")
     questions_list = questions['Вопрос'].tolist()
     answer_list = []
 
@@ -262,8 +315,14 @@ if __name__ == "__main__":
     )
 
     for current_question in tqdm(questions_list, desc="Генерация ответов"):
+        TOP_K_GLOBAL = 4
         answer = answer_generation(question=current_question, client_ans=client_ans)
+        while ("Извините, но сейчас я не могу дать ответ на ваш вопрос." in answer):
+            print("Новый запрос")
+            answer = answer_generation(question=current_question, client_ans=client_ans, repeat = False)
+            TOP_K_GLOBAL *= 2
+
         answer_list.append(answer.replace('\n', ' ').strip())
     questions['Ответы на вопрос'] = answer_list
-    questions.to_csv('submission.csv', index=False)
+    questions.to_csv('submission.csv', index=False, encoding="utf-8")
     print("✅ Ответы сохранены в submission.csv")
