@@ -244,7 +244,7 @@ def build_answer(question, sub_question, repeat):
     {sub_question}
     """
 
-    return text
+    return text, context_text
 
 def sub_questions(question, repeat):
     contexts = retriever.get_topk_contexts(question, repeat = repeat)
@@ -262,9 +262,11 @@ def sub_questions(question, repeat):
 
     return text
 
+
+
 # Функция генерации ответа на вопрос
 def answer_generation(question, sub_question, client_ans, repeat = True):
-    question_text = build_answer(question, sub_question, repeat)
+    question_text, context = build_answer(question, sub_question, repeat)
 
     if (num_tokens_from_string(question_text) > 8000):
         return "Извините, но сейчас я не могу дать ответ на ваш вопрос"
@@ -285,7 +287,7 @@ def answer_generation(question, sub_question, client_ans, repeat = True):
             )
 
             if response and response.choices and response.choices[0].message.content:
-                return response.choices[0].message.content.strip()
+                return response.choices[0].message.content.strip(), context
             else:
                 return "Извините, но сейчас я не могу дать ответ на ваш вопрос"
 
@@ -322,6 +324,61 @@ def question_generation(question, client_ans, repeat = True):
                         "role": "user",
                         "content": [
                             {"type": "text", "text": question_text}
+                        ]
+                    }
+                ]
+            )
+
+            if response and response.choices and response.choices[0].message.content:
+                return response.choices[0].message.content.strip()
+            else:
+                return "-"
+
+        except RateLimitError:
+            print(f"Повтор через 5 секунд")
+            time.sleep(5)
+            continue
+
+        except APIError as e:
+            print(f"Ошибка API: {e}")
+            time.sleep(5)
+            continue
+
+        except Exception as e:
+            print(f"Ошибка: {e}")
+            break
+
+    return "-"
+
+
+def check_generation(question, sub_q, answer, con, client_ans, repeat = True):
+    text = f"""У тебя на руках имеется вопрос клиента,дополнительные вопросыб контекст, ответ который был дан
+    
+    Проверь полноту ответа по правилам:
+    - Первостепенно нужно проверить соответствует ли ответ вопросу основываясь на контексте
+    - Не обязательно должен быть ответ на доп вопросы
+    - Доп вопросы используй для того, чтоб понять полон ли ответ или нуждается в доработке
+    - Соответсвует ли ответ вопросу и является ли он полным
+    - Если считаешь что ответ хороший пиши "Принято", иначе раскрой то, чего нет в ответе
+
+    Вопрос клиента: {question}
+    Дополнительные вопросы:
+    {question}
+    Ответ: {question}
+    Контекст:
+    {con}
+    """
+
+    MAX_RETRIES = 3
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = client_ans.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": text}
                         ]
                     }
                 ]
@@ -397,5 +454,8 @@ if __name__ == "__main__":
     sub_q = question_generation(question=q, client_ans=client_ans)
     print(sub_q, "\n\n\n")
 
-    ans = answer_generation(question=q, sub_question=sub_q, client_ans=client_ans)
-    print(ans)
+    ans, con = answer_generation(question=q, sub_question=sub_q, client_ans=client_ans)
+    print(ans, "\n\n\n")
+
+    check = check_generation(q,sub_q,ans,con,client_ans)
+    print(check)
