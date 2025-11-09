@@ -15,8 +15,8 @@ LLM_API_KEY = os.getenv("LLM_API_KEY")
 EMBEDDER_API_KEY = os.getenv("EMBEDDER_API_KEY")
 
 TOP_K = 8 # Количество контекстов для генерации ответа
-TOP_K_GLOBAL = 8 # Количество контекстов для повторной генерации ответа
-TOP_K_BEFORE_RERANK = 20 # Количество кандидатов для реранкера
+TOP_K_GLOBAL = 16 # Количество контекстов для повторной генерации ответа
+TOP_K_BEFORE_RERANK = 40 # Количество кандидатов для реранкера
 LLM_MODEL = "openrouter/mistralai/mistral-small-3.2-24b-instruct" # Модель для генерации ответов openrouter/google/gemma-3-27b-it openrouter/mistralai/mistral-small-3.2-24b-instruct
 EMBEDDING_MODEL = "text-embedding-3-small" # Модель для эмбеддингов
 RERANK_MODEL = "deepinfra/Qwen/Qwen3-Reranker-4B" # Модель для реранкинга
@@ -315,12 +315,12 @@ if __name__ == "__main__":
     )
 
     for current_question in tqdm(questions_list, desc="Генерация ответов"):
-        TOP_K_GLOBAL = 4
         answer = answer_generation(question=current_question, client_ans=client_ans)
-        while ("Извините, но сейчас я не могу дать ответ на ваш вопрос." in answer):
+        while ("Извините" in answer):
             print("Новый запрос")
             answer = answer_generation(question=current_question, client_ans=client_ans, repeat = False)
-            if (TOP_K_GLOBAL == 24):
+            if (TOP_K_GLOBAL == 32):
+                TOP_K_GLOBAL = 16
                 break
             TOP_K_GLOBAL *= 2
 
