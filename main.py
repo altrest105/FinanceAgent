@@ -323,9 +323,9 @@ if __name__ == "__main__":
     for current_question in tqdm(questions_list, desc="Генерация ответов"):
         answer = answer_generation(question=current_question, client_ans=client_ans)
         attempts = 1
-        while ("Извините" in answer) and (attempts <= 5):
-            print(f"⚠️ Удовлетворительный ответ не получен (попытка {attempts}/5)")
-            RANKS = {'1': 8, '2': 4, '3': 4, '4': 16, '5': 16}
+        while ("Извините" in answer) and (attempts <= 8):
+            print(f"⚠️ Удовлетворительный ответ не получен (попытка {attempts}/8)")
+            RANKS = {'1': 8, '2': 16, '3': 16, '4': 7, '5': 6, '6': 5, '7': 4, '8': 3}
             TOP_K_GLOBAL = RANKS.get(str(attempts), 4)
             answer = answer_generation(question=current_question, client_ans=client_ans, repeat = False)
             attempts += 1
