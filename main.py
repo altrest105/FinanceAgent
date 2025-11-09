@@ -213,7 +213,7 @@ class KnowledgeBaseRetriever:
 
 # --- Генерация ответа ---
 # Функция построения запроса к LLM для генерации ответа
-def build_answer(question, repeat):
+def build_answer(question, sub_question, repeat):
     contexts = retriever.get_topk_contexts(question, repeat = repeat)
 
     context_text = "\n\n---\n\n".join(contexts)
@@ -232,18 +232,39 @@ def build_answer(question, repeat):
     -  Полезный вывод: Если это уместно и информация есть в контексте, завершай ответ практическим советом или кратким выводом (например, "На что обратить внимание", "Когда какой вариант выбрать").
     -  Ограничения: Отвечай только на основе предоставленного контекста. Не придумывай информацию и не используй свои общие знания.
     -  Если ответа нет: Если в контексте нет релевантной информации для ответа на вопрос (или для полноценного сравнения), вежливо сообщи: "Извините, но сейчас я не могу дать ответ на ваш вопрос."
+    -  Также после вопроса пользователя у тебя есть список из пронумерованных доп вопросов, при ответе на главынй вопрос пользователя используй ответы на доп вопросы чтоб расширить полноту своего ответа
+    -  Сами ответы на доп вопросы писать не надо, их ты используешь внутри только чтоб подкрепить свой ответ
 
     Контекст:
     {context_text}
 
     Вопрос клиента: {question}
+
+    Дополнительные вопросы:
+    {sub_question}
+    """
+
+    return text
+
+def sub_questions(question, repeat):
+    contexts = retriever.get_topk_contexts(question, repeat = repeat)
+
+    context_text = "\n\n---\n\n".join(contexts)
+    
+    text = f"""У тебя на руках имеется вопрос клиента и немного контекста, сгенерируй 5 доп вопроса в виде списка на основе вопроса и контекста, которые помогут другой LLM модели лучше раскрыть тему ответив на вопрос пользователя 
+    Правила твоего ответа:
+    - Необходимо написать только вопросы без MD разметки и пояснительных надписей
+    
+    Вопрос клиента: {question}
+    Контекст:
+    {context_text}    
     """
 
     return text
 
 # Функция генерации ответа на вопрос
-def answer_generation(question, client_ans, repeat = True):
-    question_text = build_answer(question, repeat)
+def answer_generation(question, sub_question, client_ans, repeat = True):
+    question_text = build_answer(question, sub_question, repeat)
 
     if (num_tokens_from_string(question_text) > 8000):
         return "Извините, но сейчас я не могу дать ответ на ваш вопрос"
@@ -285,6 +306,48 @@ def answer_generation(question, client_ans, repeat = True):
     return "Извините, но сейчас я не могу дать ответ на ваш вопрос"
 
 
+def question_generation(question, client_ans, repeat = True):
+    question_text = sub_questions(question, repeat)
+
+    if (num_tokens_from_string(question_text) > 8000):
+        return "Извините, но сейчас я не могу дать ответ на ваш вопрос"
+
+    MAX_RETRIES = 3
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = client_ans.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": question_text}
+                        ]
+                    }
+                ]
+            )
+
+            if response and response.choices and response.choices[0].message.content:
+                return response.choices[0].message.content.strip()
+            else:
+                return "-"
+
+        except RateLimitError:
+            print(f"Повтор через 5 секунд")
+            time.sleep(5)
+            continue
+
+        except APIError as e:
+            print(f"Ошибка API: {e}")
+            time.sleep(5)
+            continue
+
+        except Exception as e:
+            print(f"Ошибка: {e}")
+            break
+
+    return "-"
+
 # --- Основной запуск ---
 if __name__ == "__main__":   
     # Создание эмбеддинга
@@ -314,17 +377,25 @@ if __name__ == "__main__":
         api_key=LLM_API_KEY,
     )
 
-    for current_question in tqdm(questions_list, desc="Генерация ответов"):
-        TOP_K_GLOBAL = 4
-        answer = answer_generation(question=current_question, client_ans=client_ans)
-        while ("Извините, но сейчас я не могу дать ответ на ваш вопрос." in answer):
-            print("Новый запрос")
-            answer = answer_generation(question=current_question, client_ans=client_ans, repeat = False)
-            if (TOP_K_GLOBAL == 24):
-                break
-            TOP_K_GLOBAL *= 2
+    # for current_question in tqdm(questions_list, desc="Генерация ответов"):
+    #     TOP_K_GLOBAL = 4
+    #     answer = answer_generation(question=current_question, client_ans=client_ans)
+    #     while ("Извините, но сейчас я не могу дать ответ на ваш вопрос." in answer):
+    #         print("Новый запрос")
+    #         answer = answer_generation(question=current_question, client_ans=client_ans, repeat = False)
+    #         if (TOP_K_GLOBAL == 24):
+    #             break
+    #         TOP_K_GLOBAL *= 2
 
-        answer_list.append(answer.replace('\n', ' ').strip())
-    questions['Ответы на вопрос'] = answer_list
-    questions.to_csv('submission.csv', index=False, encoding="utf-8")
-    print("✅ Ответы сохранены в submission.csv")
+    #     answer_list.append(answer.replace('\n', ' ').strip())
+    # questions['Ответы на вопрос'] = answer_list
+    # questions.to_csv('submission.csv', index=False, encoding="utf-8")
+    # print("✅ Ответы сохранены в submission.csv")
+
+
+    q = 'Чем отличаются кредитные каникулы от внесудебного банкротства?'
+    sub_q = question_generation(question=q, client_ans=client_ans)
+    print(sub_q, "\n\n\n")
+
+    ans = answer_generation(question=q, sub_question=sub_q, client_ans=client_ans)
+    print(ans)
