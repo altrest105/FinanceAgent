@@ -285,7 +285,7 @@ if __name__ == "__main__":
     )
 
     # Генерация и сохранение ответов на вопросы из questions.csv
-    questions = pd.read_csv('./q50.csv')
+    questions = pd.read_csv('./q50.csv', encoding="utf-8")
     questions_list = questions['Вопрос'].tolist()
     answer_list = []
 
@@ -303,5 +303,5 @@ if __name__ == "__main__":
 
         answer_list.append(answer.replace('\n', ' ').strip())
     questions['Ответы на вопрос'] = answer_list
-    questions.to_csv('submission.csv', index=False)
+    questions.to_csv('submission.csv', index=False, encoding="utf-8")
     print("✅ Ответы сохранены в submission.csv")
