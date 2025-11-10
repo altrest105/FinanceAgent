@@ -14,7 +14,7 @@ load_dotenv()
 LLM_API_KEY = os.getenv("LLM_API_KEY")
 EMBEDDER_API_KEY = os.getenv("EMBEDDER_API_KEY")
 
-TOP_K = 8 # Количество контекстов для генерации ответа
+TOP_K = 16 # Количество контекстов для генерации ответа
 TOP_K_GLOBAL = 4 # Количество контекстов для повторной генерации ответа
 TOP_K_BEFORE_RERANK = 40 # Количество кандидатов для реранкера
 LLM_MODEL = "openrouter/mistralai/mistral-small-3.2-24b-instruct" # Модель для генерации ответов openrouter/google/gemma-3-27b-it openrouter/mistralai/mistral-small-3.2-24b-instruct
@@ -323,9 +323,9 @@ if __name__ == "__main__":
     for current_question in tqdm(questions_list, desc="Генерация ответов"):
         answer = answer_generation(question=current_question, client_ans=client_ans)
         attempts = 1
-        while ("Извините" in answer) and (attempts <= 8):
-            print(f"⚠️ Удовлетворительный ответ не получен (попытка {attempts}/8)")
-            RANKS = {'1': 8, '2': 16, '3': 16, '4': 7, '5': 6, '6': 5, '7': 4, '8': 3}
+        while ("Извините" in answer) and (attempts <= 10):
+            print(f"⚠️ Удовлетворительный ответ не получен (попытка {attempts}/10)")
+            RANKS = {'1': 14, '2': 12, '3': 10, '4': 9, '5': 8, '6': 7, '7': 6, '8': 5, '9': 4, '10': 3}
             TOP_K_GLOBAL = RANKS.get(str(attempts), 4)
             answer = answer_generation(question=current_question, client_ans=client_ans, repeat = False)
             attempts += 1
