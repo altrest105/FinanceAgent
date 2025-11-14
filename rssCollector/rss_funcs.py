@@ -8,6 +8,8 @@ from sumy.summarizers.lex_rank import LexRankSummarizer
 
 from googletrans import Translator
 
+MAX_NEWS = 5
+
 translator = Translator()
 
 
@@ -35,7 +37,7 @@ def collect_from_rss(url):
     feed = feedparser.parse(url)
     news = []
 
-    for entry in feed.entries:
+    for entry in feed.entries[:MAX_NEWS]:
         title = entry.get("title", "")
         link = entry.get("link", "")
         published = entry.get("published", "")

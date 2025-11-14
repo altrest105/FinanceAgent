@@ -4,8 +4,16 @@ from tqdm import tqdm
 
 from rss_funcs import collect_from_rss, summarize_text, translate_to_russian
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-def process_rss_sources(input_csv="source_rss.csv", output_csv="rss_base.csv"):
+
+def process_rss_sources(
+        input_csv="source_rss.csv",
+        output_csv="rss_base.csv"
+    ):
+
+    input_csv = os.path.join(BASE_DIR, input_csv)
+    output_csv = os.path.join(BASE_DIR, output_csv)
 
     if not os.path.exists(input_csv):
         raise FileNotFoundError(f"Файл '{input_csv}' не найден")
@@ -21,7 +29,7 @@ def process_rss_sources(input_csv="source_rss.csv", output_csv="rss_base.csv"):
         try:
             items = collect_from_rss(url)
         except Exception as e:
-            print(f"❌ Ошибка RSS {url}: {e}")
+            print(f"Ошибка {url}: {e}")
             continue
 
         for item in items:
