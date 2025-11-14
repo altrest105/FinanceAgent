@@ -4,12 +4,15 @@ from tqdm import tqdm
 
 from rss_funcs import collect_from_rss, summarize_text, translate_to_russian
 
+SOURCES_FILE = "source_rss.csv"
+RSS_FILE = "rss_base.csv"
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def process_rss_sources(
-        input_csv="source_rss.csv",
-        output_csv="rss_base.csv"
+        input_csv=SOURCES_FILE,
+        output_csv=RSS_FILE
     ):
 
     input_csv = os.path.join(BASE_DIR, input_csv)
@@ -76,7 +79,3 @@ def process_rss_sources(
         df_out = df_existing
 
     df_out.to_csv(output_csv, index=False, encoding="utf-8-sig")
-
-
-if __name__ == "__main__":
-    process_rss_sources()
