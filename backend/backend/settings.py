@@ -10,7 +10,51 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import logging
+import warnings
+import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+warnings.filterwarnings("ignore", category=UserWarning)
+
+load_dotenv()
+
+# LLM Configuration
+LLM_CONFIG = {
+    "base_url": os.getenv("BASE_URL", "https://openrouter.ai/api/v1"),
+    "api_key": os.getenv("LLM_API_KEY"),
+    "model": os.getenv("MODEL", "openai/gpt-5.1"),
+    'max_question_length': int(os.getenv("MAX_QUESTION_LENGTH", 500)),
+    "max_tokens": int(os.getenv("MAX_TOKENS", 8000)),
+}
+
+# Logging Configuration
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+
+    'formatters': {
+        'default': {
+            'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        },
+    },
+
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'default',
+        },
+    },
+
+    'loggers': {
+        '': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': True,
+        },
+    }
+}
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
