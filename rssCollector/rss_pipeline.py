@@ -23,6 +23,13 @@ def process_rss_sources(
     if "rss" not in df_sources.columns:
         raise ValueError("source_rss.csv должен содержать колонку 'rss'")
 
+    if os.path.exists(output_csv):
+        df_existing = pd.read_csv(output_csv)
+        existing_summaries = set(df_existing["summary"].astype(str).tolist())
+    else:
+        df_existing = pd.DataFrame()
+        existing_summaries = set()
+
     all_news = []
 
     for url in tqdm(df_sources["rss"].tolist()):
@@ -45,6 +52,11 @@ def process_rss_sources(
             if summary is None:
                 summary = content_ru[:500]
 
+            if summary in existing_summaries:
+                continue
+
+            existing_summaries.add(summary)
+
             all_news.append({
                 "title": title_ru,
                 "summary": summary,
@@ -54,7 +66,15 @@ def process_rss_sources(
                 "source": url,
             })
 
-    df_out = pd.DataFrame(all_news)
+    if len(all_news) > 0:
+        df_new = pd.DataFrame(all_news)
+        if df_existing.empty:
+            df_out = df_new
+        else:
+            df_out = pd.concat([df_existing, df_new], ignore_index=True)
+    else:
+        df_out = df_existing
+
     df_out.to_csv(output_csv, index=False, encoding="utf-8-sig")
 
 
