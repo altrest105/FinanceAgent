@@ -1,6 +1,18 @@
 from django.urls import path
-from .views import AgentOrchestratorAPIView
+from .views import (
+    ChatAPIView,
+    TokenManagementAPIView,
+    ConversationHistoryAPIView,
+)
 
 urlpatterns = [
-    path('ask/', AgentOrchestratorAPIView.as_view(), name='agent_ask'),
+    # Основной чат
+    path('chat/', ChatAPIView.as_view(), name='chat'),
+    
+    # Управление токеном
+    path('token/save/', TokenManagementAPIView.as_view(), name='token-save'),
+    path('token/status/', TokenManagementAPIView.as_view(), name='token-status'),
+    
+    # История диалогов
+    path('history/', ConversationHistoryAPIView.as_view(), name='history'),
 ]

@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-warnings.filterwarnings("ignore", category=UserWarning)
+#warnings.filterwarnings("ignore", category=UserWarning)
 
 load_dotenv()
 
@@ -159,7 +159,7 @@ LLM_CONFIG = {
     'base_url': os.getenv('LLM_BASE_URL', 'https://openrouter.ai/api/v1'),
     'api_key': os.getenv('LLM_API_KEY', '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'),
     'model': os.getenv('LLM_MODEL', 'openai/gpt-5.1'),
-    'max_tokens': os.getenv('LLM_MAX_TOKENS', '8000')
+    'max_tokens': int(os.getenv('LLM_MAX_TOKENS', '8000'))
 }
 
 ENCRYPTION_KEY = os.getenv('ENCRYPTION_KEY', 'zaizwddTH69_9txJ8i5XHj9rEZHWFnWLH27LNjYUfkk=')

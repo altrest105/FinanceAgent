@@ -359,99 +359,99 @@ def build_answer_prompt(question, context_text):
     
     return prompt
 
-async def generate_answer(question, top_k = TOP_K):
-    global _retriever, _llm_client
+# async def generate_answer(question, top_k = TOP_K):
+#     global _retriever, _llm_client
     
-    logger.info("=" * 80)
-    logger.info("🤖 ГЕНЕРАЦИЯ ОТВЕТА (RAG)")
-    logger.info("=" * 80)
-    logger.info(f"  ├─ Вопрос: {question[:100]}...")
-    logger.info(f"  └─ Top-K контекстов: {top_k}")
+#     logger.info("=" * 80)
+#     logger.info("🤖 ГЕНЕРАЦИЯ ОТВЕТА (RAG)")
+#     logger.info("=" * 80)
+#     logger.info(f"  ├─ Вопрос: {question[:100]}...")
+#     logger.info(f"  └─ Top-K контекстов: {top_k}")
     
-    if not _retriever:
-        logger.error("❌ RAG система не инициализирована!")
-        raise RuntimeError("RAG система не инициализирована. Вызовите initialize_rag() сначала.")
+#     if not _retriever:
+#         logger.error("❌ RAG система не инициализирована!")
+#         raise RuntimeError("RAG система не инициализирована. Вызовите initialize_rag() сначала.")
     
-    try:
-        logger.debug("  ⏳ Этап 1: Получение релевантных контекстов...")
-        contexts = _retriever.get_topk_contexts(question, top_k)
-        context_text = "\n\n---\n\n".join(contexts)
+#     try:
+#         logger.debug("  ⏳ Этап 1: Получение релевантных контекстов...")
+#         contexts = _retriever.get_topk_contexts(question, top_k)
+#         context_text = "\n\n---\n\n".join(contexts)
         
-        logger.info(f"  ✓ Получено контекстов: {len(contexts)}")
-        logger.debug(f"     └─ Общая длина контекста: {len(context_text)} символов")
+#         logger.info(f"  ✓ Получено контекстов: {len(contexts)}")
+#         logger.debug(f"     └─ Общая длина контекста: {len(context_text)} символов")
         
-        logger.debug("  ⏳ Этап 2: Построение промпта...")
-        prompt = build_answer_prompt(question, context_text)
+#         logger.debug("  ⏳ Этап 2: Построение промпта...")
+#         prompt = build_answer_prompt(question, context_text)
         
-        token_count = num_tokens_from_string(prompt)
-        max_tokens = 8000
+#         token_count = num_tokens_from_string(prompt)
+#         max_tokens = 8000
         
-        logger.debug(f"  ├─ Токенов в промпте: {token_count}")
-        logger.debug(f"  └─ Максимум токенов: {max_tokens}")
+#         logger.debug(f"  ├─ Токенов в промпте: {token_count}")
+#         logger.debug(f"  └─ Максимум токенов: {max_tokens}")
         
-        if token_count > max_tokens:
-            logger.warning(f"  ⚠️ Промпт слишком длинный ({token_count} > {max_tokens})")
-            logger.info("=" * 80)
-            return "Извините, но сейчас я не могу дать ответ на ваш вопрос (слишком длинный контекст)."
+#         if token_count > max_tokens:
+#             logger.warning(f"  ⚠️ Промпт слишком длинный ({token_count} > {max_tokens})")
+#             logger.info("=" * 80)
+#             return "Извините, но сейчас я не могу дать ответ на ваш вопрос (слишком длинный контекст)."
         
-        logger.debug("  ⏳ Этап 3: Генерация ответа через LLM...")
-        logger.debug(f"     ├─ Модель: {settings.LLM_CONFIG.get('model')}")
-        logger.debug(f"     └─ Max retries: 3")
+#         logger.debug("  ⏳ Этап 3: Генерация ответа через LLM...")
+#         logger.debug(f"     ├─ Модель: {settings.LLM_CONFIG.get('model')}")
+#         logger.debug(f"     └─ Max retries: 3")
         
-        MAX_RETRIES = 3
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                logger.debug(f"     ⏳ Попытка {attempt}/{MAX_RETRIES}...")
+#         MAX_RETRIES = 3
+#         for attempt in range(1, MAX_RETRIES + 1):
+#             try:
+#                 logger.debug(f"     ⏳ Попытка {attempt}/{MAX_RETRIES}...")
                 
-                response = await _llm_client.chat.completions.create(
-                    model=settings.LLM_CONFIG.get("model"),
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ]
-                )
+#                 response = await _llm_client.chat.completions.create(
+#                     model=settings.LLM_CONFIG.get("model"),
+#                     messages=[
+#                         {
+#                             "role": "user",
+#                             "content": prompt
+#                         }
+#                     ]
+#                 )
                 
-                if response and response.choices and response.choices[0].message.content:
-                    answer = response.choices[0].message.content.strip()
+#                 if response and response.choices and response.choices[0].message.content:
+#                     answer = response.choices[0].message.content.strip()
                     
-                    logger.info("=" * 80)
-                    logger.info("✅ ОТВЕТ УСПЕШНО СГЕНЕРИРОВАН")
-                    logger.info("=" * 80)
-                    logger.info(f"  ├─ Длина ответа: {len(answer)} символов")
-                    logger.info(f"  ├─ Токенов (примерно): {num_tokens_from_string(answer)}")
-                    logger.info(f"  └─ Попытка: {attempt}/{MAX_RETRIES}")
-                    logger.info("=" * 80)
+#                     logger.info("=" * 80)
+#                     logger.info("✅ ОТВЕТ УСПЕШНО СГЕНЕРИРОВАН")
+#                     logger.info("=" * 80)
+#                     logger.info(f"  ├─ Длина ответа: {len(answer)} символов")
+#                     logger.info(f"  ├─ Токенов (примерно): {num_tokens_from_string(answer)}")
+#                     logger.info(f"  └─ Попытка: {attempt}/{MAX_RETRIES}")
+#                     logger.info("=" * 80)
                     
-                    return answer
-                else:
-                    logger.warning(f"     ⚠️ Пустой ответ от LLM")
-                    logger.info("=" * 80)
-                    return "Извините, но сейчас я не могу дать ответ на ваш вопрос."
+#                     return answer
+#                 else:
+#                     logger.warning(f"     ⚠️ Пустой ответ от LLM")
+#                     logger.info("=" * 80)
+#                     return "Извините, но сейчас я не могу дать ответ на ваш вопрос."
                     
-            except Exception as e:
-                logger.warning(f"     ⚠️ Ошибка (попытка {attempt}/{MAX_RETRIES}): {e}")
+#             except Exception as e:
+#                 logger.warning(f"     ⚠️ Ошибка (попытка {attempt}/{MAX_RETRIES}): {e}")
                 
-                if attempt < MAX_RETRIES:
-                    logger.debug(f"     ⏳ Ждём 5 секунд перед следующей попыткой...")
-                    await asyncio.sleep(5)
-                else:
-                    logger.error("     ❌ Все попытки исчерпаны")
+#                 if attempt < MAX_RETRIES:
+#                     logger.debug(f"     ⏳ Ждём 5 секунд перед следующей попыткой...")
+#                     await asyncio.sleep(5)
+#                 else:
+#                     logger.error("     ❌ Все попытки исчерпаны")
         
-        logger.info("=" * 80)
-        return "Извините, но сейчас я не могу дать ответ на ваш вопрос."
+#         logger.info("=" * 80)
+#         return "Извините, но сейчас я не могу дать ответ на ваш вопрос."
         
-    except Exception as e:
-        logger.error("=" * 80)
-        logger.error("❌ КРИТИЧЕСКАЯ ОШИБКА В GENERATE_ANSWER")
-        logger.error("=" * 80)
-        logger.error(f"Вопрос: {question[:100]}...")
-        logger.error(f"Тип ошибки: {type(e).__name__}")
-        logger.error(f"Сообщение: {str(e)}", exc_info=True)
-        logger.error("=" * 80)
+#     except Exception as e:
+#         logger.error("=" * 80)
+#         logger.error("❌ КРИТИЧЕСКАЯ ОШИБКА В GENERATE_ANSWER")
+#         logger.error("=" * 80)
+#         logger.error(f"Вопрос: {question[:100]}...")
+#         logger.error(f"Тип ошибки: {type(e).__name__}")
+#         logger.error(f"Сообщение: {str(e)}", exc_info=True)
+#         logger.error("=" * 80)
         
-        return "Извините, произошла ошибка при обработке вашего запроса."
+#         return "Извините, произошла ошибка при обработке вашего запроса."
 
 async def initialize_rag(force_rebuild = False):
     global _retriever, _llm_client, _local_embedder, _local_reranker

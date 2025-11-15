@@ -1,46 +1,231 @@
-# agent/views.py
-
 from adrf.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from tinkoff.invest import exceptions
-from .orchestrator import execute_agent_query
+from django.contrib.auth.models import User
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 import logging
+import uuid
+import traceback
+
+from .orchestrator import process_question
+from .services.memorybank import MemoryBank
 
 logger = logging.getLogger(__name__)
 
-class AgentOrchestratorAPIView(APIView):
+
+@method_decorator(csrf_exempt, name='dispatch')
+class ChatAPIView(APIView):
+    """
+    Основной endpoint для чата с агентом
+    
+    POST /api/chat/
+    Body: {
+        "question": "Что такое дивиденды?",
+        "session_id": "optional-session-id"
+    }
+    """
+    
+    permission_classes = []
+    
     async def post(self, request):
-        # 1. Получение токена и данных из запроса
-        auth_header = request.headers.get("Authorization", "")
-        tinkoff_token = auth_header.replace("Bearer ", "").strip()
+        logger.info("=" * 80)
+        logger.info("🚀 НАЧАЛО ОБРАБОТКИ ЗАПРОСА /api/chat/")
+        logger.info("=" * 80)
         
-        user_question = request.data.get("question")
-        account_id = request.data.get("account_id")
-        
-        # 2. Валидация
-        if not all([tinkoff_token, user_question, account_id]):
-            return Response(
-                {"error": "Требуются 'Authorization: Bearer <token>' в заголовке, а также 'question' и 'account_id' в теле запроса."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
         try:
-            # 3. АСИНХРОННЫЙ ВЫЗОВ ОРКЕСТРАТОРА
-            result = await execute_agent_query(user_question, tinkoff_token, account_id)
+            question = request.data.get("question")
+            session_id = request.data.get("session_id") or str(uuid.uuid4())
             
-            return Response(result, status=status.HTTP_200_OK)
-
-        except exceptions.AioRequestError as e:
-            # Обработка ошибок, связанных с Тинькофф API (неверный токен, лимиты)
-            logger.error(f"Ошибка API Тинькофф: {e}")
-            return Response(
-                {"error": "Ошибка API Тинькофф Инвестиций", "detail": str(e), "code": getattr(e.code, 'name', 'UNKNOWN')},
-                status=status.HTTP_401_UNAUTHORIZED
+            logger.info(f"  ├─ question: {question[:100] if question else 'None'}...")
+            logger.info(f"  └─ session_id: {session_id}")
+            
+            if not question or not question.strip():
+                logger.warning("⚠️ Пустой вопрос!")
+                return Response(
+                    {"error": "Поле 'question' обязательно и не может быть пустым"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            logger.info("👤 Определение пользователя...")
+            if request.user and request.user.is_authenticated:
+                user = request.user
+                logger.info(f"  └─ ✅ Аутентифицированный: {user.username}")
+            else:
+                username = f"anon_{session_id[:8]}"
+                user, created = await User.objects.aget_or_create(
+                    username=username,
+                    defaults={'is_active': False}
+                )
+                logger.info(f"  └─ 🔓 Анонимный: {username}")
+            
+            logger.info(f"\n📨 Вопрос от {user.username}: '{question}'\n")
+            
+            logger.info("🎯 Вызов оркестратора...")
+            result = await process_question(
+                question=question.strip(),
+                user=user,
+                session_id=session_id
             )
+            
+            logger.info(f"✅ Оркестратор завершил работу")
+            logger.info(f"  ├─ intent: {result.get('intent')}")
+            logger.info(f"  └─ success: {result.get('success')}")
+            
+            response_data = {
+                "session_id": session_id,
+                "question": question,
+                "answer": result.get("answer", "Произошла ошибка"),
+                "intent": result.get("intent", "unknown"),
+                "success": result.get("success", False),
+                "metadata": {
+                    "user_id": user.id,
+                    "user_name": user.username,
+                }
+            }
+            
+            intent = result.get("intent")
+            if intent == "trade":
+                response_data["trade_result"] = result.get("trade_result")
+            elif intent == "securities_info":
+                response_data["securities_info"] = result.get("securities_info")
+            
+            logger.info("✅ ЗАПРОС УСПЕШНО ОБРАБОТАН\n")
+            
+            return Response(response_data, status=status.HTTP_200_OK)
+        
         except Exception as e:
-            logger.error(f"Критическая ошибка в AgentOrchestratorAPIView: {e}", exc_info=True)
+            logger.error("❌ КРИТИЧЕСКАЯ ОШИБКА В ChatAPIView")
+            logger.error(traceback.format_exc())
+            
             return Response(
-                {"error": "Внутренняя ошибка сервера", "detail": str(e)},
+                {
+                    "error": "Внутренняя ошибка сервера",
+                    "detail": str(e),
+                    "success": False
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class TokenManagementAPIView(APIView):
+    """
+    Управление Tinkoff токеном
+    
+    POST /api/token/save/ - Сохранение токена
+    GET /api/token/status/ - Проверка статуса токена
+    """
+    
+    permission_classes = []
+    
+    async def post(self, request):
+        logger.info("🔑 POST /api/token/save/")
+        
+        try:
+            token = request.data.get("token")
+            
+            if not token:
+                return Response(
+                    {"error": "Поле 'token' обязательно"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            if not request.user or not request.user.is_authenticated:
+                return Response(
+                    {"error": "Требуется аутентификация"},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            
+            memory = MemoryBank(request.user)
+            await memory.save_tinkoff_token(token)
+            
+            logger.info(f"✅ Токен сохранён для {request.user.username}")
+            
+            return Response(
+                {
+                    "success": True,
+                    "message": "Токен Tinkoff успешно сохранён",
+                    "has_token": True
+                },
+                status=status.HTTP_200_OK
+            )
+        
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения токена: {e}")
+            return Response(
+                {"error": "Ошибка при сохранении токена"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    async def get(self, request):
+        logger.info("🔍 GET /api/token/status/")
+        
+        try:
+            if not request.user or not request.user.is_authenticated:
+                return Response(
+                    {"has_token": False, "authenticated": False},
+                    status=status.HTTP_200_OK
+                )
+            
+            memory = MemoryBank(request.user)
+            has_token = memory.has_token()
+            
+            return Response(
+                {
+                    "has_token": has_token,
+                    "authenticated": True,
+                    "user": request.user.username
+                },
+                status=status.HTTP_200_OK
+            )
+        
+        except Exception as e:
+            logger.error(f"❌ Ошибка проверки токена: {e}")
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class ConversationHistoryAPIView(APIView):
+    """
+    История диалогов
+    
+    GET /api/history/?limit=20
+    """
+    
+    permission_classes = []
+    
+    async def get(self, request):
+        logger.info("📜 GET /api/history/")
+        
+        try:
+            if not request.user or not request.user.is_authenticated:
+                return Response(
+                    {"error": "Требуется аутентификация"},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            
+            limit = int(request.query_params.get('limit', 20))
+            
+            memory = MemoryBank(request.user)
+            history = await memory.get_conversation_history(limit=limit)
+            
+            logger.info(f"✅ Найдено диалогов: {len(history)}")
+            
+            return Response(
+                {
+                    "count": len(history),
+                    "history": history
+                },
+                status=status.HTTP_200_OK
+            )
+        
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения истории: {e}")
+            return Response(
+                {"error": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
