@@ -6,7 +6,6 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-MAX_TOKENS = settings.LLM_CONFIG.get("max_tokens", 8000)
 ENCODING = tiktoken.get_encoding("cl100k_base")
 
 def build_answer(question, context_text=""):
@@ -39,7 +38,7 @@ def build_answer(question, context_text=""):
 async def answer_generation(question, client_ans, context_text=""):
     question_text = build_answer(question, context_text=context_text)
 
-    if (len(ENCODING.encode(question_text)) > MAX_TOKENS):
+    if (len(ENCODING.encode(question_text)) > settings.LLM_CONFIG.get("max_tokens", 8000)):
         return "Извините, но сейчас я не могу дать ответ на ваш вопрос"
 
     MAX_RETRIES = 3

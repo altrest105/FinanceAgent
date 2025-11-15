@@ -1,6 +1,6 @@
 from django.apps import AppConfig
 
 
-class LlmConfig(AppConfig):
+class AgentConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'llm'
+    name = 'agent'
