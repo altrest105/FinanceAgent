@@ -3,26 +3,59 @@ import tiktoken
 import asyncio
 import json
 from enum import Enum
-from openai import AsyncOpenAI, RateLimitError, APIError
+from openai import RateLimitError, APIError
 from django.conf import settings
+from django.contrib.auth import get_user_model
+from asgiref.sync import sync_to_async
 
 # Импорт сервисов
 from .services.rag import get_rag_context
 from .services.tinvest import (
     search_instrument, 
     place_order, 
-    get_token_from_settings,
     get_portfolio_summary,
     get_accounts
 )
 from .services.memorybank import MemoryBank, get_or_request_token, extract_token_from_message
-from .apps import is_rag_ready, get_retriever, get_llm_client
+from .apps import is_rag_ready, get_llm_client
 
 logger = logging.getLogger(__name__)
 
 ENCODING = tiktoken.get_encoding("cl100k_base")
-
 MAX_TOKENS = settings.LLM_CONFIG.get("max_tokens")
+
+User = get_user_model()
+
+
+# ============================================================================
+# ПОЛУЧЕНИЕ ДЕМО-ПОЛЬЗОВАТЕЛЯ ИЗ БД
+# ============================================================================
+
+async def get_demo_user():
+    """Получение или создание демо-пользователя из БД"""
+    try:
+        user = await sync_to_async(User.objects.get)(username='demo_user')
+        logger.debug(f"✅ Демо-пользователь найден: {user.username} (ID: {user.id})")
+        return user
+    except User.DoesNotExist:
+        logger.warning("⚠️ Демо-пользователь не найден, создаём...")
+        
+        user = await sync_to_async(User.objects.create)(
+            username='demo_user',
+            email='demo@raifrag.local',
+            first_name='Демо',
+            last_name='Пользователь',
+            is_active=True,
+            is_staff=False,
+            is_superuser=False
+        )
+        
+        # Устанавливаем пароль
+        await sync_to_async(user.set_password)('demo123456')
+        await sync_to_async(user.save)()
+        
+        logger.info(f"✅ Создан демо-пользователь: {user.username} (ID: {user.id})")
+        return user
 
 
 # ============================================================================
@@ -438,7 +471,7 @@ async def execute_trade(params, token):
 # ГЛАВНАЯ ФУНКЦИЯ-ОРКЕСТРАТОР (3 СЦЕНАРИЯ)
 # ============================================================================
 
-async def process_question(question, user, account_id=None, session_id=None):
+async def process_question(question, user=None, account_id=None, session_id=None):
     """
     Главная функция-оркестратор для обработки вопроса пользователя
     
@@ -450,7 +483,14 @@ async def process_question(question, user, account_id=None, session_id=None):
     logger.info("=" * 80)
     logger.info("🎬 ЗАПУСК ОРКЕСТРАТОРА")
     logger.info("=" * 80)
-    logger.info(f"  ├─ Пользователь: {user.username}")
+    
+    # ✅ ПОЛУЧАЕМ ДЕМО-ПОЛЬЗОВАТЕЛЯ ИЗ БД
+    if user is None or not hasattr(user, 'is_authenticated') or not user.is_authenticated:
+        user = await get_demo_user()
+        logger.info(f"  ├─ 👤 Демо-пользователь из БД: {user.username} (ID: {user.id})")
+    else:
+        logger.info(f"  ├─ 🔐 Авторизованный пользователь: {user.username} (ID: {user.id})")
+    
     logger.info(f"  ├─ Вопрос: {question[:100]}...")
     logger.info(f"  └─ Session ID: {session_id or 'N/A'}")
     
@@ -463,7 +503,7 @@ async def process_question(question, user, account_id=None, session_id=None):
             "answer": "Извините, система временно недоступна. Попробуйте позже."
         }
     
-    # Инициализируем MemoryBank
+    # Инициализируем MemoryBank (БЕЗ session_id в конструкторе)
     logger.info("💾 Инициализация MemoryBank...")
     memory = MemoryBank(user)
     logger.info(f"  └─ MemoryBank готов для {user.username}")
@@ -674,7 +714,11 @@ async def process_question(question, user, account_id=None, session_id=None):
         logger.error("=" * 80)
         
         error_msg = "Извините, произошла ошибка при обработке вашего запроса."
-        await memory.save_conversation(question, f"Ошибка: {str(e)}", "error", session_id=session_id)
+        
+        try:
+            await memory.save_conversation(question, f"Ошибка: {str(e)}", "error", session_id=session_id)
+        except Exception as save_error:
+            logger.error(f"❌ Не удалось сохранить ошибку в историю: {save_error}")
         
         return {
             "intent": "unknown",

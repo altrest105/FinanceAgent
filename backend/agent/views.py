@@ -1,14 +1,13 @@
 from adrf.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from django.contrib.auth.models import User
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 import logging
 import uuid
 import traceback
 
-from .orchestrator import process_question
+from .orchestrator import process_question, get_demo_user
 from .services.memorybank import MemoryBank
 
 logger = logging.getLogger(__name__)
@@ -47,17 +46,9 @@ class ChatAPIView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            logger.info("👤 Определение пользователя...")
-            if request.user and request.user.is_authenticated:
-                user = request.user
-                logger.info(f"  └─ ✅ Аутентифицированный: {user.username}")
-            else:
-                username = f"anon_{session_id[:8]}"
-                user, created = await User.objects.aget_or_create(
-                    username=username,
-                    defaults={'is_active': False}
-                )
-                logger.info(f"  └─ 🔓 Анонимный: {username}")
+            # ✅ ПОЛУЧАЕМ ДЕМО-ПОЛЬЗОВАТЕЛЯ ИЗ БД
+            user = await get_demo_user()
+            logger.info(f"👤 Пользователь: {user.username} (ID: {user.id})")
             
             logger.info(f"\n📨 Вопрос от {user.username}: '{question}'\n")
             
@@ -131,16 +122,14 @@ class TokenManagementAPIView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            if not request.user or not request.user.is_authenticated:
-                return Response(
-                    {"error": "Требуется аутентификация"},
-                    status=status.HTTP_401_UNAUTHORIZED
-                )
+            # ✅ ПОЛУЧАЕМ ДЕМО-ПОЛЬЗОВАТЕЛЯ ИЗ БД
+            user = await get_demo_user()
+            logger.info(f"👤 Сохранение токена для: {user.username}")
             
-            memory = MemoryBank(request.user)
+            memory = MemoryBank(user)
             await memory.save_tinkoff_token(token)
             
-            logger.info(f"✅ Токен сохранён для {request.user.username}")
+            logger.info(f"✅ Токен сохранён для {user.username}")
             
             return Response(
                 {
@@ -162,20 +151,17 @@ class TokenManagementAPIView(APIView):
         logger.info("🔍 GET /api/token/status/")
         
         try:
-            if not request.user or not request.user.is_authenticated:
-                return Response(
-                    {"has_token": False, "authenticated": False},
-                    status=status.HTTP_200_OK
-                )
+            # ✅ ПОЛУЧАЕМ ДЕМО-ПОЛЬЗОВАТЕЛЯ ИЗ БД
+            user = await get_demo_user()
             
-            memory = MemoryBank(request.user)
-            has_token = memory.has_token()
+            memory = MemoryBank(user)
+            has_token = await memory.has_token()
             
             return Response(
                 {
                     "has_token": has_token,
                     "authenticated": True,
-                    "user": request.user.username
+                    "user": user.username
                 },
                 status=status.HTTP_200_OK
             )
@@ -202,15 +188,12 @@ class ConversationHistoryAPIView(APIView):
         logger.info("📜 GET /api/history/")
         
         try:
-            if not request.user or not request.user.is_authenticated:
-                return Response(
-                    {"error": "Требуется аутентификация"},
-                    status=status.HTTP_401_UNAUTHORIZED
-                )
+            # ✅ ПОЛУЧАЕМ ДЕМО-ПОЛЬЗОВАТЕЛЯ ИЗ БД
+            user = await get_demo_user()
             
             limit = int(request.query_params.get('limit', 20))
             
-            memory = MemoryBank(request.user)
+            memory = MemoryBank(user)
             history = await memory.get_conversation_history(limit=limit)
             
             logger.info(f"✅ Найдено диалогов: {len(history)}")
@@ -218,7 +201,8 @@ class ConversationHistoryAPIView(APIView):
             return Response(
                 {
                     "count": len(history),
-                    "history": history
+                    "history": history,
+                    "user": user.username
                 },
                 status=status.HTTP_200_OK
             )
