@@ -615,6 +615,7 @@ async def process_question(question, user=None, account_id=None, session_id=None
                     accounts = await get_accounts(token)
                     if accounts:
                         portfolio = await get_portfolio_summary(token, accounts[0]["id"])
+                        print(portfolio)
                         portfolio_info = f"\n\nДанные портфеля пользователя:\n{json.dumps(portfolio, ensure_ascii=False, indent=2)}"
                 except Exception as e:
                     logger.warning(f"⚠️ Не удалось получить портфель: {e}")
