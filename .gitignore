@@ -2,3 +2,5 @@ venv/
 .venv/
 __pycache__/
 .env
+*.sqlite3
+.DS_Store
