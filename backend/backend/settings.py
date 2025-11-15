@@ -20,42 +20,6 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 load_dotenv()
 
-# LLM Configuration
-LLM_CONFIG = {
-    "base_url": os.getenv("BASE_URL", "https://openrouter.ai/api/v1"),
-    "api_key": os.getenv("LLM_API_KEY"),
-    "model": os.getenv("MODEL", "openai/gpt-5.1"),
-    'max_question_length': int(os.getenv("MAX_QUESTION_LENGTH", 500)),
-    "max_tokens": int(os.getenv("MAX_TOKENS", 8000)),
-}
-
-# Logging Configuration
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-
-    'formatters': {
-        'default': {
-            'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        },
-    },
-
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'formatter': 'default',
-        },
-    },
-
-    'loggers': {
-        '': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': True,
-        },
-    }
-}
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -64,12 +28,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-$g&!jkxrz!z35)u$ip(8rvti!f%tk3x_(eb)gm)-x)frp)9e2b'
+SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-$g&!jkxrz!z35)u$ip(8rvti!f%tk3x_(eb)gm)-x)frp)9e2b')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -89,6 +53,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -105,6 +70,7 @@ TEMPLATES = [
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
+                'django.template.context_processors.debug',
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
@@ -149,9 +115,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'ru-ru'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Europe/Moscow'
 
 USE_I18N = True
 
@@ -167,3 +133,72 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+# CORS
+CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True
+
+
+# Encryption
+ENCRYPTION_KEY = os.getenv('ENCRYPTION_KEY', 'zaizwddTH69_9txJ8i5XHj9rEZHWFnWLH27LNjYUfkk=')
+
+# REST Framework
+REST_FRAMEWORK = {
+    'DEFAULT_RENDERER_CLASSES': [
+        'rest_framework.renderers.JSONRenderer',
+    ],
+    'DEFAULT_PARSER_CLASSES': [
+        'rest_framework.parsers.JSONParser',
+    ],
+}
+
+
+# LLM Configuration
+LLM_CONFIG = {
+    'base_url': os.getenv('LLM_BASE_URL', 'https://openrouter.ai/api/v1'),
+    'api_key': os.getenv('LLM_API_KEY', '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'),
+    'model': os.getenv('LLM_MODEL', 'openai/gpt-5.1'),
+    'max_tokens': os.getenv('LLM_MAX_TOKENS', '8000')
+}
+
+ENCRYPTION_KEY = os.getenv('ENCRYPTION_KEY', 'zaizwddTH69_9txJ8i5XHj9rEZHWFnWLH27LNjYUfkk=')
+
+# Cache
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'unique-snowflake',
+        'TIMEOUT': 86400,
+    }
+}
+
+
+# Logging
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'agent': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+    },
+}
