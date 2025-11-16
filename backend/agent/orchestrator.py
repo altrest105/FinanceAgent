@@ -8,7 +8,6 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from asgiref.sync import sync_to_async
 
-# Импорт сервисов
 from .services.rag import get_rag_context
 from .services.tinvest import (
     place_order, 
@@ -51,7 +50,6 @@ async def get_demo_user():
             is_superuser=False
         )
         
-        # Устанавливаем пароль
         await sync_to_async(user.set_password)('demo123456')
         await sync_to_async(user.save)()
         
@@ -65,9 +63,9 @@ async def get_demo_user():
 
 class IntentType(Enum):
     """Типы намерений пользователя"""
-    TRADE = "trade"                      # Купить/продать ценные бумаги
-    SECURITIES_INFO = "securities_info"  # Вопрос ПРО ценные бумаги (новости, аналитика)
-    GENERAL = "general"                  # Вопрос НЕ про ценные бумаги (финансы, право, услуги)
+    TRADE = "trade" # Купить/продать ценные бумаги
+    SECURITIES_INFO = "securities_info" # Вопрос ПРО ценные бумаги (новости, аналитика)
+    GENERAL = "general" # Вопрос НЕ про ценные бумаги (финансы, право, услуги)
 
 
 class TradeAction(Enum):
@@ -166,7 +164,7 @@ def build_securities_extraction_prompt(question):
 def build_general_answer_prompt(question, rag_context=""):
     """Промпт для ответа на ОБЩИЕ вопросы (НЕ про ценные бумаги)"""
     return f"""Ты — русскоязычный ИИ-ассистент, эксперт в области финансов, инвестиций, права и государственных услуг.
-Твои возможности - ответить на вопросы про кредиты, налоги, бюджетирование, финансовое планирование, государственные услуги и многое другое.
+Твои возможности - ответить на вопросы про налоги, бюджетирование, финансовое планирование и многое другое.
 Также ты умеешь анализировать инвестиционные портфели и давать общие советы по финансам, выставлять заявки на покупку и продажу ценных бумаг в Т-Инвестициях.
 
 Твоя задача — дать небольшой, структурированный и максимально полезный ответ на вопрос пользователя. Используй контекст, если он полезен.
@@ -196,23 +194,22 @@ def build_securities_answer_prompt(question, securities_context="", user_portfol
     """Промпт для ответа на вопросы ПРО ценные бумаги"""
     return f"""Ты — русскоязычный ИИ-ассистент, эксперт в области ценных бумаг, фондового рынка и финансовой аналитики.
 
-Твоя задача — дать небольшой, структурированный ответ на вопрос пользователя о ценных бумагах, основываясь на предоставленных новостях и данных о пользователе.
+Твоя задача — дать небольшой, структурированный ответ на вопрос пользователя о ценных бумагах. Если требуется, используй предоставленные данные об акциях и данные о пользователе.
 
 Правила твоего ответа:
 - Главный заголовок: Начинай ответ с основного заголовка, используя ###.
 - Подзаголовки: Используй ####. ОБЯЗАТЕЛЬНО нумеруй логические разделы (#### 1. **Компания А**, #### 2. **Компания Б**).
-- Актуальность: ОБЯЗАТЕЛЬНО упоминай даты новостей и событий.
-- Достоверность: Указывай источники информации.
-- Источники: Если в новостях есть конкретные данные (цены, проценты), указывай их.
+- Достоверность: Указывай источники информации и дату получения.
+- Если есть конкретные данные (цены, проценты), указывай их.
 - Таблицы: Для сравнения котировок используй таблицы в формате Markdown.
 - Выделение: Выделяй важные цифры, даты, изменения цен жирным шрифтом (**...**).
-- Объективность: Представляй разные точки зрения, если они есть в новостях.
 - Если данных недостаточно, честно сообщи об этом.
-- В конце, если уместно, сделай какие-то практические рекомендации по действиям пользователя с его портфелем или ценными бумагами.
+- В конце, если уместно, сделай какие-то практические рекомендации по действиям пользователя с его портфелем или ценными бумагами, чтобы было связано с вопросом.
 - Сохраняй форматирование Markdown (заголовки, списки, таблицы) в ответе.
 - В конце добавь "Не инвестиционная рекомендация."
+- Не говори, что пользователь тебе что-то предоставил. Он лишь задал вопрос.
 
-Новости:
+Данные об акциях, источник "T-Инвестиции", актуальные в данный момент:
 {securities_context}
 
 Портфель пользователя:
@@ -221,9 +218,7 @@ def build_securities_answer_prompt(question, securities_context="", user_portfol
 Данные о пользователе:
 {user_data}
 
-Вопрос пользователя: {question}
-
-Дай структурированный ответ с акцентом на актуальность и конкретные данные."""
+Вопрос пользователя: {question}"""
 
 
 # ============================================================================
@@ -310,7 +305,6 @@ async def extract_trade_params(question, client):
         return None
     
     try:
-        # Очистка JSON из Markdown
         if "```json" in response:
             response = response.split("```json")[1].split("```")[0].strip()
         elif "```" in response:
@@ -342,7 +336,6 @@ async def extract_securities_info(question, client):
         return None
     
     try:
-        # Очистка JSON из Markdown
         if "```json" in response:
             response = response.split("```json")[1].split("```")[0].strip()
         elif "```" in response:
@@ -408,7 +401,6 @@ async def clarify_trade_params(question, params, client):
     
     if not clarification:
         logger.warning("⚠️ Не удалось сгенерировать уточняющий вопрос, используем стандартный")
-        # Fallback на стандартное сообщение
         missing_parts = []
         if not params.get("action"):
             missing_parts.append("- **Действие**: купить или продать?")
@@ -439,7 +431,6 @@ async def execute_trade(params, token, client, question):
     quantity = params.get("quantity")
     price = params.get("price")
     
-    # ✅ НОВАЯ ЛОГИКА: Проверяем каждый параметр и генерируем уточняющий вопрос
     if not all([action, ticker, quantity]):
         logger.warning("⚠️ Недостаточно параметров для торговли")
         logger.info("  └─ Генерация уточняющего вопроса...")
@@ -454,7 +445,6 @@ async def execute_trade(params, token, client, question):
         }
     
     try:
-        # Получаем первый счет
         logger.info("  ⏳ Получение списка счетов...")
         accounts = await get_accounts(token)
         if not accounts:
@@ -466,7 +456,6 @@ async def execute_trade(params, token, client, question):
         account_id = accounts[0]["id"]
         logger.info(f"  ✓ Используется счёт: {account_id}")
         
-        # Ищем инструмент по тикеру (с проверкой доступности)
         logger.info(f"  ⏳ Поиск доступного для торговли инструмента {ticker}...")
         
         from .services.tinvest import get_instrument_by_ticker
@@ -564,7 +553,6 @@ async def process_question(question, user=None, account_id=None, session_id=None
     logger.info("🎬 ЗАПУСК ОРКЕСТРАТОРА")
     logger.info("=" * 80)
     
-    # ✅ ПОЛУЧАЕМ ДЕМО-ПОЛЬЗОВАТЕЛЯ ИЗ БД
     if user is None or not hasattr(user, 'is_authenticated') or not user.is_authenticated:
         user = await get_demo_user()
         logger.info(f"  ├─ 👤 Демо-пользователь из БД: {user.username} (ID: {user.id})")
@@ -574,7 +562,6 @@ async def process_question(question, user=None, account_id=None, session_id=None
     logger.info(f"  ├─ Вопрос: {question[:100]}...")
     logger.info(f"  └─ Session ID: {session_id or 'N/A'}")
     
-    # Проверяем готовность RAG системы
     if not is_rag_ready():
         logger.error("❌ RAG система не готова!")
         return {
@@ -583,17 +570,14 @@ async def process_question(question, user=None, account_id=None, session_id=None
             "answer": "Извините, система временно недоступна. Попробуйте позже."
         }
     
-    # Инициализируем MemoryBank (БЕЗ session_id в конструкторе)
     logger.info("💾 Инициализация MemoryBank...")
     memory = MemoryBank(user)
     logger.info(f"  └─ MemoryBank готов для {user.username}")
     
-    # Получаем LLM клиент из AppConfig
     client = get_llm_client()
     logger.info("🔌 LLM клиент получен из AppConfig")
     
     try:
-        # 🔑 ПРОВЕРКА НА ТОКЕН В СООБЩЕНИИ
         logger.info("🔍 Проверка на наличие токена в сообщении...")
         potential_token = await extract_token_from_message(question)
         
@@ -612,24 +596,21 @@ async def process_question(question, user=None, account_id=None, session_id=None
         
         logger.info("  └─ Токен не обнаружен, продолжаем обработку вопроса")
         
-        # 1️⃣ ОПРЕДЕЛЯЕМ НАМЕРЕНИЕ (3 СЦЕНАРИЯ)
         intent = await classify_intent(question, client)
         
-        # Получаем контекст из истории
         logger.info("📜 Получение контекста из истории диалогов...")
         conversation_context = await memory.get_relevant_context(question, top_k=3)
         logger.info(f"  └─ Контекст: {len(conversation_context)} символов")
         
         
         # ====================================================================
-        # СЦЕНАРИЙ 1️⃣: ТОРГОВАЯ ОПЕРАЦИЯ (TRADE)
+        # СЦЕНАРИЙ 1: ТОРГОВАЯ ОПЕРАЦИЯ (TRADE)
         # ====================================================================
         if intent == IntentType.TRADE:
             logger.info("=" * 80)
             logger.info("1️⃣ СЦЕНАРИЙ: ТОРГОВАЯ ОПЕРАЦИЯ")
             logger.info("=" * 80)
             
-            # Извлекаем параметры торговли
             params = await extract_trade_params(question, client)
             
             if not params:
@@ -644,7 +625,6 @@ async def process_question(question, user=None, account_id=None, session_id=None
                     "answer": clarification
                 }
             
-            # Проверяем наличие токена
             logger.info("🔐 Проверка наличия токена для торговли...")
             token = await get_or_request_token(memory)
             
@@ -656,10 +636,8 @@ async def process_question(question, user=None, account_id=None, session_id=None
             
             logger.info("  ✓ Токен найден, выполняем торговлю")
             
-            # Выполняем операцию (передаём client и question для уточняющих вопросов)
             trade_result = await execute_trade(params, token, client, question)
             
-            # Если нужно уточнение, сохраняем частичные параметры
             if trade_result.get("needs_clarification"):
                 await memory.save_conversation(
                     question=question,
@@ -702,17 +680,15 @@ async def process_question(question, user=None, account_id=None, session_id=None
         
         
         # ====================================================================
-        # СЦЕНАРИЙ 2️⃣: ВОПРОС ПРО ЦЕННЫЕ БУМАГИ (SECURITIES_INFO)
+        # СЦЕНАРИЙ 2: ВОПРОС ПРО ЦЕННЫЕ БУМАГИ (SECURITIES_INFO)
         # ====================================================================
         elif intent == IntentType.SECURITIES_INFO:
             logger.info("=" * 80)
             logger.info("2️⃣ СЦЕНАРИЙ: ВОПРОС ПРО ЦЕННЫЕ БУМАГИ")
             logger.info("=" * 80)
             
-            # Извлекаем информацию о ценных бумагах
             securities_info = await extract_securities_info(question, client)
             
-            # ✅ ИСПРАВЛЕНИЕ: Получаем токен ДО запроса к API
             logger.info("🔐 Получение токена для запроса данных о ценных бумагах...")
             token = await get_or_request_token(memory)
             
@@ -735,13 +711,10 @@ async def process_question(question, user=None, account_id=None, session_id=None
             
             logger.info("  ✓ Токен найден, запрашиваем данные")
 
-            # Получаем новости
             securities_context = await get_multiple_instruments_info(token, securities_info.get("tickers", []))
             securities_context = format_multiple_instruments_for_llm(securities_context)
             
-            # Опционально: добавляем данные портфеля, если есть токен
             portfolio_info = ""
-            token = await get_or_request_token(memory)
             if token:
                 try:
                     accounts = await get_accounts(token)
@@ -754,7 +727,6 @@ async def process_question(question, user=None, account_id=None, session_id=None
             
             user_info = await memory.get_profile_summary()
 
-            # Генерируем ответ
             prompt = build_securities_answer_prompt(question, securities_context, portfolio_info, user_info)
             answer = await call_llm(client, prompt)
             
@@ -783,28 +755,29 @@ async def process_question(question, user=None, account_id=None, session_id=None
         
         
         # ====================================================================
-        # СЦЕНАРИЙ 3️⃣: ОБЩИЙ ВОПРОС НЕ ПРО ЦЕННЫЕ БУМАГИ (GENERAL)
+        # СЦЕНАРИЙ 3: ОБЩИЙ ВОПРОС НЕ ПРО ЦЕННЫЕ БУМАГИ (GENERAL)
         # ====================================================================
         else:
             logger.info("=" * 80)
             logger.info("3️⃣ СЦЕНАРИЙ: ОБЩИЙ ФИНАНСОВЫЙ ВОПРОС (RAG)")
             logger.info("=" * 80)
             
-            # Получаем контекст из RAG
             logger.info("🔍 Получение контекста из RAG...")
             try:
-                rag_context = await get_rag_context(question, top_k=3)
-                logger.info(f"  ✓ RAG контекст: {len(rag_context)} символов")
+                if settings.RAG_CONFIG.get("use_rag"):
+                    rag_context = await get_rag_context(question, top_k=3)
+                    logger.info(f"  ✓ RAG контекст: {len(rag_context)} символов")
+                else:
+                    rag_context = ""
+                    logger.info("  ✓ RAG система отключена в настройках")
             except Exception as e:
                 logger.error(f"  ❌ Ошибка получения контекста из RAG: {e}")
                 rag_context = ""
             
-            # Добавляем контекст из истории
             if conversation_context:
                 logger.info("  ✓ Добавление контекста из истории диалогов")
                 rag_context = f"{conversation_context}\n\n---\n\n{rag_context}"
             
-            # Генерируем ответ
             prompt = build_general_answer_prompt(question, rag_context)
             answer = await call_llm(client, prompt)
             
@@ -819,9 +792,8 @@ async def process_question(question, user=None, account_id=None, session_id=None
                 session_id=session_id
             )
             
-            # Периодический анализ профиля каждые 10 диалогов
-            history = await memory.get_conversation_history(limit=10)
-            if len(history) % 10 == 0:
+            history = await memory.get_conversation_count()
+            if history % 10 == 0:
                 logger.info("📊 Запуск автоматического анализа профиля (каждые 10 диалогов)...")
                 from .services.memorybank import analyze_and_update_profile
                 risk_analysis = await analyze_and_update_profile(memory, client)

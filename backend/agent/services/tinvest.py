@@ -46,15 +46,7 @@ class OperationType:
 # ============================================================================
 
 def money_value_to_float(money_value):
-    """
-    Конвертация MoneyValue в float
-    
-    Args:
-        money_value: Объект MoneyValue из Tinkoff API
-        
-    Returns:
-        float: Денежное значение в виде числа
-    """
+    """Конвертация MoneyValue в float"""
     if not money_value:
         return 0.0
     
@@ -63,15 +55,7 @@ def money_value_to_float(money_value):
 
 
 def quotation_to_float(quotation):
-    """
-    Конвертация Quotation в float
-    
-    Args:
-        quotation: Объект Quotation из Tinkoff API
-        
-    Returns:
-        float: Значение котировки в виде числа
-    """
+    """Конвертация Quotation в float"""
     if not quotation:
         return 0.0
     
@@ -80,15 +64,7 @@ def quotation_to_float(quotation):
 
 
 def float_to_quotation(value):
-    """
-    Конвертация float в Quotation
-    
-    Args:
-        value: Числовое значение
-        
-    Returns:
-        Quotation: Объект для Tinkoff API
-    """
+    """Конвертация float в Quotation"""
     return Quotation(
         units=int(value),
         nano=int((value - int(value)) * 1e9)
@@ -96,17 +72,7 @@ def float_to_quotation(value):
 
 
 def format_currency(value, currency = "RUB", precision = 2):
-    """
-    Форматирование денежных значений
-    
-    Args:
-        value: Числовое значение
-        currency: Код валюты
-        precision: Количество знаков после запятой
-        
-    Returns:
-        str: Отформатированная строка с символом валюты
-    """
+    """Форматирование денежных значений"""
     if value is None:
         return "- ₽"
     
@@ -132,22 +98,8 @@ _instrument_cache = {}
 
 
 async def get_instrument_info(client, figi):
-    """
-    Получение информации об инструменте по FIGI с кэшированием
-    
-    Args:
-        client: Асинхронный клиент Tinkoff API
-        figi: FIGI инструмента
-        
-    Returns:
-        dict: Информация об инструменте
-    """
+    """Получение информации об инструменте по FIGI с кэшированием"""
     logger.debug(f"📋 Запрос информации об инструменте FIGI={figi}")
-    
-    # Проверяем кэш
-    if figi in _instrument_cache:
-        logger.debug(f"  ✓ Найдено в кэше: {_instrument_cache[figi]['ticker']}")
-        return _instrument_cache[figi]
     
     logger.debug(f"  ⏳ Запрос к API Tinkoff...")
     
@@ -169,8 +121,6 @@ async def get_instrument_info(client, figi):
             'type': str(instrument.instrument_type),
         }
         
-        # Кэшируем результат
-        _instrument_cache[figi] = info
         
         logger.info(f"  ✅ Получена информация: {info['ticker']} ({info['name']})")
         return info
@@ -178,7 +128,6 @@ async def get_instrument_info(client, figi):
     except Exception as e:
         logger.error(f"❌ Ошибка получения информации для FIGI {figi}: {e}")
         
-        # Возвращаем fallback данные
         fallback_info = {
             'name': f'Неизвестно ({figi})',
             'ticker': '?',
@@ -194,27 +143,12 @@ async def get_instrument_info(client, figi):
         return fallback_info
 
 
-def clear_instrument_cache():
-    """Очистка кэша инструментов"""
-    global _instrument_cache
-    _instrument_cache.clear()
-    logger.info("🗑️ Кэш инструментов очищен")
-
-
 # ============================================================================
 # ПОЛУЧЕНИЕ СЧЕТОВ
 # ============================================================================
 
 async def get_accounts(token):
-    """
-    Получение списка счетов пользователя
-    
-    Args:
-        token: API токен Tinkoff
-        
-    Returns:
-        List[Dict]: Список счетов с полями 'name', 'id', 'type', 'status'
-    """
+    """Получение списка счетов пользователя"""
     logger.info("=" * 60)
     logger.info("👤 ПОЛУЧЕНИЕ СПИСКА СЧЕТОВ")
     logger.info("=" * 60)
@@ -258,16 +192,7 @@ async def get_accounts(token):
 # ============================================================================
 
 async def get_portfolio(token, account_id):
-    """
-    Получение информации о портфеле
-    
-    Args:
-        token: API токен Tinkoff
-        account_id: ID счета
-        
-    Returns:
-        dict: Информация о портфеле
-    """
+    """Получение информации о портфеле"""
     logger.info("=" * 60)
     logger.info("💼 ПОЛУЧЕНИЕ ПОРТФЕЛЯ")
     logger.info("=" * 60)
@@ -320,16 +245,7 @@ async def get_portfolio(token, account_id):
 # ============================================================================
 
 async def get_positions(token, account_id):
-    """
-    Получение детальной информации о позициях в портфеле
-    
-    Args:
-        token: API токен Tinkoff
-        account_id: ID счета
-        
-    Returns:
-        List[dict]: Список позиций с детальной информацией
-    """
+    """Получение детальной информации о позициях в портфеле"""
     logger.info("=" * 60)
     logger.info("📊 ПОЛУЧЕНИЕ ПОЗИЦИЙ ПОРТФЕЛЯ")
     logger.info("=" * 60)
@@ -353,7 +269,6 @@ async def get_positions(token, account_id):
                 
                 logger.debug(f"  ⏳ Обработка позиции {idx}/{len(portfolio_response.positions)}...")
                 
-                # Получаем информацию об инструменте
                 instrument_info = await get_instrument_info(client, pos.figi)
                 
                 current_price = money_value_to_float(pos.current_price)
@@ -387,7 +302,6 @@ async def get_positions(token, account_id):
                 
                 logger.info(f"  ✓ {len(positions)}. {instrument_info['ticker']}: {quantity} шт. × {format_currency(current_price, instrument_info['currency'])}")
             
-            # Сортируем по стоимости позиции (убывание)
             positions = sorted(positions, key=lambda x: x['total_cost'], reverse=True)
             
             logger.info("=" * 60)
@@ -418,19 +332,7 @@ async def get_operations(
     to_date = None,
     figi = None
 ):
-    """
-    Получение истории операций
-    
-    Args:
-        token: API токен Tinkoff
-        account_id: ID счета
-        from_date: Дата начала периода (по умолчанию - месяц назад)
-        to_date: Дата окончания периода (по умолчанию - сейчас)
-        figi: FIGI инструмента для фильтрации (опционально)
-        
-    Returns:
-        List[dict]: Список операций
-    """
+    """Получение истории операций"""
     if from_date is None:
         from_date = datetime.now() - timedelta(days=30)
     if to_date is None:
@@ -496,18 +398,7 @@ async def get_operations(
 # ============================================================================
 
 async def search_instrument(token, query, instrument_type = None):
-    """
-    Поиск инструмента по названию или тикеру с фильтрацией по API-доступности 
-    и строгим совпадением тикера.
-    
-    Args:
-        token: API токен Tinkoff
-        query: Поисковый запрос (тикер или название)
-        instrument_type: Тип инструмента для фильтрации (опционально)
-        
-    Returns:
-        List[dict]: Список найденных инструментов
-    """
+    """Поиск инструмента по названию или тикеру с фильтрацией по API-доступности и строгим совпадением тикера."""
     normalized_query = query.strip().upper()
     logger.info("=" * 60)
     logger.info("🔍 ПОИСК ИНСТРУМЕНТА")
@@ -518,23 +409,19 @@ async def search_instrument(token, query, instrument_type = None):
     try:
         async with AsyncClient(token) as client:
             logger.debug("  ⏳ Запрос к API Tinkoff...")
-            # Используем оригинальный query для поиска, чтобы получить больше результатов
             search_response = await client.instruments.find_instrument(query=query) 
             
             results = []
             
             for idx, instrument in enumerate(search_response.instruments, 1):
-                # 1. Фильтрация по типу инструмента (если задано)
                 if instrument_type and str(instrument.instrument_type) != instrument_type:
                     logger.debug(f"  ⏭️ {idx}. {instrument.ticker}: пропущен (тип {instrument.instrument_type})")
                     continue
                 
-                # 2. Строгое совпадение тикера (только если запрос похож на тикер)
                 if len(normalized_query) <= 6 and instrument.ticker.upper() != normalized_query:
                     logger.debug(f"  ⏭️ {idx}. {instrument.ticker}: пропущен (тикер не совпадает)")
                     continue
                 
-                # Получаем полную информацию об инструменте через FIGI
                 try:
                     logger.debug(f"  ⏳ Получение полной информации для {instrument.ticker}...")
                     
@@ -544,13 +431,10 @@ async def search_instrument(token, query, instrument_type = None):
                     )
                     full_instrument = full_instrument_response.instrument
                     
-                    # 3. ФИЛЬТРАЦИЯ ПО API ДОСТУПНОСТИ
                     is_api_available = getattr(full_instrument, 'api_trade_available_flag', False)
                     if not is_api_available:
                         logger.info(f"  ❌ {idx}. {full_instrument.ticker} - пропущен (недоступен через API)")
                         continue
-                    
-                    # --- ИНСТРУМЕНТ ПРОШЕЛ ВСЕ ФИЛЬТРЫ ---
                     
                     result = {
                         'name': full_instrument.name,
@@ -564,7 +448,6 @@ async def search_instrument(token, query, instrument_type = None):
                         'lot': full_instrument.lot,
                         'min_price_increment': quotation_to_float(full_instrument.min_price_increment) if hasattr(full_instrument, 'min_price_increment') else None,
                         'trading_status': str(full_instrument.trading_status) if hasattr(full_instrument, 'trading_status') else 'unknown',
-                        # Поля доступности
                         'api_trade_available_flag': is_api_available,
                         'buy_available_flag': getattr(full_instrument, 'buy_available_flag', True),
                         'sell_available_flag': getattr(full_instrument, 'sell_available_flag', True),
@@ -577,7 +460,6 @@ async def search_instrument(token, query, instrument_type = None):
                     
                 except Exception as e:
                     logger.warning(f"  ⚠️ Не удалось получить полную информацию для {instrument.ticker}: {e}")
-                    # В случае ошибки получения полной информации, пропускаем его, так как не можем проверить доступность API
                     continue 
             
             logger.info("=" * 60)
@@ -603,28 +485,16 @@ async def search_instrument(token, query, instrument_type = None):
 # ============================================================================
 
 async def check_instrument_tradeable(token, instrument):
-    """
-    Проверка доступности инструмента для торговли
-    
-    Args:
-        token: API токен Tinkoff
-        instrument: Словарь с информацией об инструменте
-        
-    Returns:
-        bool: True если инструмент доступен для торговли
-    """
+    """Проверка доступности инструмента для торговли"""
     try:
-        # Проверяем статус торговли
         trading_status = instrument.get('trading_status', '').lower()
         
-        # Список статусов, при которых торговля доступна
         tradeable_statuses = [
             'normal_trading',
             'security_trading_status_normal_trading',
             'trading_status_normal_trading'
         ]
         
-        # Проверяем наличие флагов доступности
         api_trade_available = instrument.get('api_trade_available_flag', True)
         buy_available = instrument.get('buy_available_flag', True)
         sell_available = instrument.get('sell_available_flag', True)
@@ -654,20 +524,10 @@ async def check_instrument_tradeable(token, instrument):
 # ============================================================================
 
 async def get_instrument_by_ticker(token, ticker):
-    """
-    Быстрый поиск ДОСТУПНОГО ДЛЯ ТОРГОВЛИ инструмента по тикеру
-    
-    Args:
-        token: API токен Tinkoff
-        ticker: Тикер инструмента (например, 'SBER')
-        
-    Returns:
-        dict: Информация об инструменте или None
-    """
+    """Быстрый поиск ДОСТУПНОГО ДЛЯ ТОРГОВЛИ инструмента по тикеру"""
     logger.info(f"🔍 Поиск доступного для торговли инструмента: {ticker}")
     
     try:
-        # Получаем все инструменты по тикеру
         instruments = await search_instrument(token, ticker)
         
         if not instruments:
@@ -676,106 +536,29 @@ async def get_instrument_by_ticker(token, ticker):
         
         logger.info(f"  ✓ Найдено инструментов: {len(instruments)}")
         
-        # Ищем точное совпадение по тикеру среди доступных
         tradeable_instruments = []
         
         for instrument in instruments:
             if instrument['ticker'].upper() == ticker.upper():
                 logger.debug(f"  🔍 Проверка: {instrument['ticker']} ({instrument.get('name')})")
                 
-                # Проверяем доступность для торговли
                 if await check_instrument_tradeable(token, instrument):
                     tradeable_instruments.append(instrument)
                     logger.info(f"  ✅ Доступен для торговли: {instrument['ticker']}")
                 else:
                     logger.warning(f"  ⚠️ НЕ доступен для торговли: {instrument['ticker']}")
         
-        # Возвращаем первый доступный инструмент
         if tradeable_instruments:
             selected = tradeable_instruments[0]
             logger.info(f"  ✅ Выбран инструмент: {selected['ticker']} - {selected.get('name')}")
             return selected
         
-        # Если точных совпадений нет, возвращаем первый результат
         logger.warning(f"  ⚠️ Точное совпадение не найдено, используется первый результат")
         return instruments[0]
         
     except Exception as e:
         logger.error(f"❌ Ошибка поиска инструмента по тикеру '{ticker}': {e}")
         return None
-
-
-# ============================================================================
-# ПОИСК АКЦИЙ (УПРОЩЁННЫЙ МЕТОД)
-# ============================================================================
-
-async def search_shares(token, query):
-    """
-    Упрощённый поиск только акций
-    
-    Args:
-        token: API токен Tinkoff
-        query: Поисковый запрос (тикер или название)
-        
-    Returns:
-        List[dict]: Список найденных акций
-    """
-    logger.info("=" * 60)
-    logger.info("🔍 ПОИСК АКЦИЙ")
-    logger.info("=" * 60)
-    logger.info(f"  └─ Запрос: '{query}'")
-    
-    try:
-        async with AsyncClient(token) as client:
-            logger.debug("  ⏳ Запрос к API Tinkoff (shares)...")
-            
-            # Используем специальный метод для акций
-            shares_response = await client.instruments.shares()
-            
-            # Фильтруем по запросу
-            query_lower = query.lower()
-            results = []
-            
-            for share in shares_response.instruments:
-                # Ищем совпадение по тикеру или названию
-                if (query_lower in share.ticker.lower() or 
-                    query_lower in share.name.lower()):
-                    
-                    result = {
-                        'name': share.name,
-                        'ticker': share.ticker,
-                        'figi': share.figi,
-                        'type': str(share.instrument_type),
-                        'currency': share.currency,
-                        'class_code': share.class_code,
-                        'isin': share.isin,
-                        'lot': share.lot,
-                        'min_price_increment': quotation_to_float(share.min_price_increment),
-                        'trading_status': str(share.trading_status) if hasattr(share, 'trading_status') else 'unknown'
-                    }
-                    
-                    results.append(result)
-                    logger.info(f"  ✓ {len(results)}. {share.ticker} - {share.name}")
-                    
-                    # Ограничиваем количество результатов
-                    if len(results) >= 10:
-                        break
-            
-            logger.info("=" * 60)
-            logger.info(f"✅ НАЙДЕНО АКЦИЙ: {len(results)}")
-            logger.info("=" * 60)
-            
-            return results
-            
-    except Exception as e:
-        logger.error("=" * 60)
-        logger.error("❌ ОШИБКА ПОИСКА АКЦИЙ")
-        logger.error("=" * 60)
-        logger.error(f"Запрос: '{query}'")
-        logger.error(f"Тип ошибки: {type(e).__name__}")
-        logger.error(f"Сообщение: {str(e)}", exc_info=True)
-        logger.error("=" * 60)
-        raise
 
 
 # ============================================================================
@@ -787,25 +570,11 @@ async def place_order(
     account_id,
     figi,
     quantity,
-    direction, # 'buy' или 'sell'
-    order_type, # 'market' или 'limit'
+    direction,
+    order_type,
     price = None
 ):
-    """
-    Размещение торговой заявки
-    
-    Args:
-        token: API токен Tinkoff
-        account_id: ID счета
-        figi: FIGI инструмента
-        quantity: Количество лотов
-        direction: Направление ('buy' или 'sell')
-        order_type: Тип заявки ('market' или 'limit')
-        price: Цена для лимитной заявки
-        
-    Returns:
-        dict: Информация о размещенной заявке
-    """
+    """Размещение торговой заявки"""
     logger.info("=" * 80)
     logger.info("💳 РАЗМЕЩЕНИЕ ТОРГОВОЙ ЗАЯВКИ")
     logger.info("=" * 80)
@@ -818,10 +587,8 @@ async def place_order(
     
     try:
         async with AsyncClient(token) as client:
-            # Определяем направление
             order_direction = OrderDirection.ORDER_DIRECTION_BUY if direction.lower() == 'buy' else OrderDirection.ORDER_DIRECTION_SELL
             
-            # Размещаем заявку
             if price is None:
                 logger.debug("  ⏳ Размещение рыночной заявки...")
                 
@@ -901,16 +668,7 @@ async def place_order(
 # ============================================================================
 
 async def get_portfolio_summary(token, account_id):
-    """
-    Получение полной сводки по портфелю (портфель + позиции)
-    
-    Args:
-        token: API токен Tinkoff
-        account_id: ID счета
-        
-    Returns:
-        dict: Полная информация о портфеле
-    """
+    """Получение полной сводки по портфелю (портфель + позиции)"""
     logger.info("=" * 80)
     logger.info("📊 ПОЛУЧЕНИЕ ПОЛНОЙ СВОДКИ ПОРТФЕЛЯ")
     logger.info("=" * 80)
@@ -960,17 +718,7 @@ async def get_portfolio_summary(token, account_id):
 # ============================================================================
 
 async def get_detailed_instrument_info(token, ticker_or_figi, use_figi=False):
-    """
-    Получение подробной информации об инструменте
-    
-    Args:
-        token: API токен Tinkoff
-        ticker_or_figi: Тикер или FIGI инструмента
-        use_figi: Если True, ищем по FIGI, иначе по тикеру
-        
-    Returns:
-        dict: Подробная информация об инструменте
-    """
+    """Получение подробной информации об инструменте"""
     logger.info("=" * 80)
     logger.info("📊 ПОЛУЧЕНИЕ ИНФОРМАЦИИ ОБ ИНСТРУМЕНТЕ")
     logger.info("=" * 80)
@@ -979,11 +727,9 @@ async def get_detailed_instrument_info(token, ticker_or_figi, use_figi=False):
     
     try:
         async with AsyncClient(token) as client:
-            # Если ищем по FIGI
             if use_figi:
                 figi = ticker_or_figi
             else:
-                # Сначала находим инструмент по тикеру
                 instrument = await get_instrument_by_ticker(token, ticker_or_figi)
                 if not instrument:
                     logger.error(f"  ❌ Инструмент {ticker_or_figi} не найден")
@@ -991,21 +737,18 @@ async def get_detailed_instrument_info(token, ticker_or_figi, use_figi=False):
                 figi = instrument['figi']
             
             logger.info(f"  ⏳ Получение данных по FIGI: {figi}")
-            
-            # Получаем полную информацию об инструменте
+
             instrument_response = await client.instruments.get_instrument_by(
                 id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_FIGI,
                 id=figi
             )
             instr = instrument_response.instrument
             
-            # Получаем текущую цену (последняя сделка)
             last_prices_response = await client.market_data.get_last_prices(figi=[figi])
             last_price = None
             if last_prices_response.last_prices:
                 last_price = quotation_to_float(last_prices_response.last_prices[0].price)
             
-            # Получаем стакан заявок (лучшие цены покупки/продажи)
             try:
                 orderbook = await client.market_data.get_order_book(
                     figi=figi,
@@ -1018,7 +761,6 @@ async def get_detailed_instrument_info(token, ticker_or_figi, use_figi=False):
                 best_bid = None
                 best_ask = None
             
-            # Получаем свечи (исторические данные за последние 30 дней)
             try:
                 from datetime import datetime, timedelta
                 now = datetime.utcnow()
@@ -1032,7 +774,7 @@ async def get_detailed_instrument_info(token, ticker_or_figi, use_figi=False):
                 )
                 
                 candles_data = []
-                for candle in candles_response.candles[-30:]:  # Последние 30 дней
+                for candle in candles_response.candles[-30:]:
                     candles_data.append({
                         'time': candle.time.isoformat(),
                         'open': quotation_to_float(candle.open),
@@ -1042,7 +784,6 @@ async def get_detailed_instrument_info(token, ticker_or_figi, use_figi=False):
                         'volume': candle.volume,
                     })
                 
-                # Расчёт изменения за период
                 if len(candles_data) >= 2:
                     first_price = candles_data[0]['close']
                     current_price = candles_data[-1]['close']
@@ -1058,7 +799,6 @@ async def get_detailed_instrument_info(token, ticker_or_figi, use_figi=False):
                 price_change = None
                 price_change_percent = None
             
-            # Формируем результат
             result = {
                 # Основная информация
                 'name': instr.name,
@@ -1133,16 +873,7 @@ async def get_detailed_instrument_info(token, ticker_or_figi, use_figi=False):
 
 
 async def get_multiple_instruments_info(token, tickers):
-    """
-    Получение информации о нескольких инструментах параллельно
-    
-    Args:
-        token: API токен Tinkoff
-        tickers: Список тикеров
-        
-    Returns:
-        dict: Словарь {ticker: info}
-    """
+    """Получение информации о нескольких инструментах параллельно"""
     logger.info("=" * 80)
     logger.info("📊 ПОЛУЧЕНИЕ ИНФОРМАЦИИ О НЕСКОЛЬКИХ ИНСТРУМЕНТАХ")
     logger.info("=" * 80)
@@ -1168,19 +899,10 @@ async def get_multiple_instruments_info(token, tickers):
 
 
 def format_instrument_info_for_llm(instrument_data):
-    """
-    Форматирование информации об инструменте для передачи в LLM
-    
-    Args:
-        instrument_data: Данные об инструменте
-        
-    Returns:
-        str: Отформатированная строка
-    """
+    """Форматирование информации об инструменте для передачи в LLM"""
     if not instrument_data:
         return "Информация об инструменте недоступна."
     
-    # Статус торговли на русском
     trading_status_map = {
         'SECURITY_TRADING_STATUS_NORMAL_TRADING': '✅ Торгуется',
         'SECURITY_TRADING_STATUS_NOT_AVAILABLE_FOR_TRADING': '❌ Недоступен',
@@ -1222,11 +944,6 @@ def format_instrument_info_for_llm(instrument_data):
     formatted += f"\n#### Статус торговли\n- {trading_status}\n"
     
     # Доступность для торговли
-    if instrument_data.get('api_trade_available_flag'):
-        formatted += "- ✅ Доступен для торговли через API\n"
-    else:
-        formatted += "- ❌ Недоступен для торговли через API\n"
-    
     if instrument_data.get('for_qual_investor_flag'):
         formatted += "- ⚠️ Только для квалифицированных инвесторов\n"
     
@@ -1253,15 +970,7 @@ def format_instrument_info_for_llm(instrument_data):
 
 
 def format_multiple_instruments_for_llm(instruments_data):
-    """
-    Форматирование информации о нескольких инструментах для LLM
-    
-    Args:
-        instruments_data: Dict {ticker: instrument_data}
-        
-    Returns:
-        str: Отформатированная строка
-    """
+    """Форматирование информации о нескольких инструментах для LLM"""
     if not instruments_data:
         return "Информация об инструментах недоступна."
     

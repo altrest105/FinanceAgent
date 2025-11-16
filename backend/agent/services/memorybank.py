@@ -1,5 +1,6 @@
 import logging
 import re
+import json
 from django.conf import settings
 from cryptography.fernet import Fernet
 from asgiref.sync import sync_to_async
@@ -8,7 +9,6 @@ from ..models import InvestorProfile, Conversation, RiskProfile, InvestmentGoal
 
 logger = logging.getLogger(__name__)
 
-# Инициализация шифрования
 ENCRYPTION_KEY = getattr(settings, 'ENCRYPTION_KEY', Fernet.generate_key())
 cipher_suite = Fernet(ENCRYPTION_KEY)
 
@@ -19,7 +19,7 @@ cipher_suite = Fernet(ENCRYPTION_KEY)
 
 class MemoryBank:
     """Банк памяти для хранения информации об инвесторе"""
-    
+
     def __init__(self, user):
         self.user = user
         self.user_id = user.id if hasattr(user, 'id') else str(user)
@@ -168,7 +168,7 @@ class MemoryBank:
                 'session_id': conv.session_id,
                 'timestamp': conv.timestamp.isoformat()
             }
-            for conv in reversed(conversations)  # Хронологический порядок
+            for conv in reversed(conversations)
         ]
         
         logger.debug(f"✅ Получено {len(result)} диалогов")
@@ -209,10 +209,8 @@ class MemoryBank:
         
         profile = await self.get_or_create_profile()
         
-        # Получаем количество диалогов
         conversation_count = await self.get_conversation_count()
         
-        # Человекочитаемые названия из Enum
         risk_labels = {
             RiskProfile.CONSERVATIVE: 'Консервативный',
             RiskProfile.MODERATE: 'Умеренный',
@@ -283,7 +281,6 @@ class MemoryBank:
         
         profile = await self.get_or_create_profile()
         
-        # Обновляем только валидные поля
         valid_fields = [
             'risk_tolerance', 'risk_score', 'primary_goal', 'secondary_goals',
             'investment_horizon_months', 'monthly_investment', 'total_capital',
@@ -293,7 +290,6 @@ class MemoryBank:
         
         for key, value in kwargs.items():
             if key in valid_fields:
-                # Валидация Enum полей
                 if key == 'risk_tolerance' and value not in RiskProfile.values:
                     logger.warning(f"⚠️ Недопустимое значение risk_tolerance: {value}")
                     continue
@@ -303,7 +299,6 @@ class MemoryBank:
                     continue
                 
                 if key == 'secondary_goals':
-                    # Фильтруем только валидные цели
                     value = [g for g in value if g in InvestmentGoal.values]
                 
                 setattr(profile, key, value)
@@ -312,39 +307,6 @@ class MemoryBank:
         await sync_to_async(profile.save)()
         
         logger.info(f"✅ Профиль обновлён")
-    
-    # === СТАТИСТИКА ===
-    
-    async def get_stats(self):
-        """Получение статистики по пользователю"""
-        profile = await self.get_or_create_profile()
-        conversation_count = await self.get_conversation_count()
-        
-        # Получаем количество диалогов по типам
-        intent_stats = {}
-        conversations = await sync_to_async(list)(
-            Conversation.objects.filter(user=self.user).values('intent')
-        )
-        
-        for conv in conversations:
-            intent = conv['intent'] or 'unknown'
-            intent_stats[intent] = intent_stats.get(intent, 0) + 1
-        
-        stats = {
-            'total_conversations': conversation_count,
-            'intent_distribution': intent_stats,
-            'profile': {
-                'risk_tolerance': profile.risk_tolerance,
-                'risk_score': profile.risk_score,
-                'primary_goal': profile.primary_goal,
-                'has_token': bool(profile.tinkoff_token_encrypted),
-            },
-            'created_at': profile.created_at.isoformat(),
-            'updated_at': profile.updated_at.isoformat(),
-        }
-        
-        logger.debug(f"📊 Статистика для user_id={self.user_id}: {stats}")
-        return stats
 
 
 # ============================================================================
@@ -371,10 +333,9 @@ async def extract_token_from_message(message):
     
     # Паттерны для токенов Tinkoff
     patterns = [
-        # Tinkoff токен с префиксом t. (основной паттерн)
         r't\.[A-Za-z0-9_\-]{80,}',
         
-        # Токен без префикса (на случай если пользователь скопировал часть)
+        # Токен без префикса
         r'[A-Za-z0-9_\-]{100,}',
         
         # Токен с явным указанием "токен:" или "token:"
@@ -388,76 +349,12 @@ async def extract_token_from_message(message):
             token = match.group(1) if match.groups() else match.group(0)
             token = token.strip()
             
-            # Tinkoff токены обычно длиной 100-150 символов
             if len(token) >= 80:
                 logger.info(f"✅ Токен найден (длина: {len(token)}, паттерн: {pattern})")
                 return token
     
     logger.debug("⚠️ Токен не найден")
     return None
-
-
-async def clear_user_data(user):
-    """Очистка всех данных пользователя (для тестирования)"""
-    logger.warning(f"🗑️ Очистка данных для user_id={user.id}")
-    
-    # Удаляем профиль
-    deleted_profiles = await sync_to_async(
-        InvestorProfile.objects.filter(user=user).delete
-    )()
-    logger.debug(f"  ├─ Удалено профилей: {deleted_profiles[0]}")
-    
-    # Удаляем диалоги
-    deleted_conversations = await sync_to_async(
-        Conversation.objects.filter(user=user).delete
-    )()
-    logger.debug(f"  └─ Удалено диалогов: {deleted_conversations[0]}")
-    
-    logger.info(f"✅ Данные пользователя {user.username} очищены")
-
-
-async def get_global_stats():
-    """Получение глобальной статистики по всем пользователям"""
-    logger.debug("📊 Получение глобальной статистики...")
-    
-    total_users = await sync_to_async(InvestorProfile.objects.count)()
-    total_conversations = await sync_to_async(Conversation.objects.count)()
-    users_with_tokens = await sync_to_async(
-        InvestorProfile.objects.filter(
-            tinkoff_token_encrypted__isnull=False
-        ).count
-    )()
-    
-    # Распределение по риск-профилям
-    risk_distribution = {}
-    profiles = await sync_to_async(list)(
-        InvestorProfile.objects.values('risk_tolerance')
-    )
-    
-    for profile in profiles:
-        risk = profile['risk_tolerance']
-        risk_distribution[risk] = risk_distribution.get(risk, 0) + 1
-    
-    # Распределение по целям
-    goal_distribution = {}
-    goal_profiles = await sync_to_async(list)(
-        InvestorProfile.objects.values('primary_goal')
-    )
-    
-    for profile in goal_profiles:
-        goal = profile['primary_goal']
-        goal_distribution[goal] = goal_distribution.get(goal, 0) + 1
-    
-    stats = {
-        'total_users': total_users,
-        'total_conversations': total_conversations,
-        'users_with_tokens': users_with_tokens,
-        'risk_distribution': risk_distribution,
-        'goal_distribution': goal_distribution,
-    }
-    
-    logger.debug(f"✅ Глобальная статистика: {stats}")
-    return stats
 
 
 # ============================================================================
@@ -494,3 +391,182 @@ def validate_risk_profile(value):
 def validate_investment_goal(value):
     """Проверка валидности инвестиционной цели"""
     return value in InvestmentGoal.values
+
+
+# ============================================================================
+# АНАЛИЗ И ОБНОВЛЕНИЕ ПРОФИЛЯ
+# ============================================================================
+
+async def analyze_and_update_profile(memory_bank, client):
+    """Автоматический анализ диалогов и обновление инвестиционного профиля"""
+    logger.info("=" * 80)
+    logger.info("🧠 АВТОМАТИЧЕСКИЙ АНАЛИЗ ИНВЕСТИЦИОННОГО ПРОФИЛЯ")
+    logger.info("=" * 80)
+    logger.info(f"  └─ User ID: {memory_bank.user_id}")
+    
+    try:
+        logger.debug("  ⏳ Получение истории диалогов...")
+        conversations = await memory_bank.get_conversation_history(limit=10)
+        
+        if not conversations:
+            logger.warning("  ⚠️ Нет диалогов для анализа")
+            return None
+        
+        logger.info(f"  ✓ Получено диалогов: {len(conversations)}")
+        
+        conversation_text = "\n\n".join([
+            f"Диалог #{i+1}:\nВопрос: {conv['question']}\nОтвет: {conv['answer']}"
+            for i, conv in enumerate(conversations)
+        ])
+        
+        current_profile = await memory_bank.get_profile_summary()
+        
+        analysis_prompt = f"""Ты — финансовый аналитик, который анализирует диалоги с инвестором для определения его инвестиционного профиля.
+
+**ТЕКУЩИЙ ПРОФИЛЬ:**
+- Склонность к риску: {current_profile['risk_profile']['type']} ({current_profile['risk_profile']['type_key']})
+- Риск-скор: {current_profile['risk_profile']['score']}/10
+- Основная цель: {current_profile['goals']['primary']} ({current_profile['goals']['primary_key']})
+- Горизонт инвестирования: {current_profile['financial_params']['investment_horizon_months']} месяцев
+- Опыт инвестирования: {current_profile['experience']['years']} лет
+- Уровень знаний: {current_profile['experience']['level']} ({current_profile['experience']['level_key']})
+
+**ПОСЛЕДНИЕ 10 ДИАЛОГОВ:**
+{conversation_text}
+
+---
+
+**ЗАДАЧА:**
+Проанализируй диалоги и определи инвестиционный профиль пользователя. Верни JSON с обновлёнными параметрами.
+
+**ДОСТУПНЫЕ ЗНАЧЕНИЯ:**
+
+**risk_tolerance** (склонность к риску):
+- "CONSERVATIVE" — консервативный (избегает рисков, предпочитает облигации)
+- "MODERATE" — умеренный (баланс риска/доходности, смешанный портфель)
+- "AGGRESSIVE" — агрессивный (готов к высоким рискам ради доходности)
+- "UNKNOWN" — не определён
+
+**primary_goal** (основная цель):
+- "CAPITAL_PRESERVATION" — сохранение капитала
+- "STABLE_INCOME" — стабильный доход
+- "CAPITAL_GROWTH" — рост капитала
+- "SPECULATION" — спекуляция
+- "RETIREMENT" — пенсионные накопления
+- "UNKNOWN" — не определена
+
+**knowledge_level** (уровень знаний):
+- "beginner" — начинающий
+- "intermediate" — средний
+- "advanced" — продвинутый
+- "expert" — эксперт
+
+**investment_horizon** (горизонт инвестирования):
+- "short" — краткосрочный (до 1 года)
+- "medium" — среднесрочный (1-3 года)
+- "long" — долгосрочный (3+ года)
+
+---
+
+**ФОРМАТ ОТВЕТА (СТРОГО JSON):**
+{{
+  "risk_appetite": "MODERATE",
+  "risk_score": 6,
+  "primary_goal": "CAPITAL_GROWTH",
+  "investment_horizon": "long",
+  "investment_horizon_months": 36,
+  "financial_literacy": "intermediate",
+  "reasoning": "Пользователь задаёт вопросы о долгосрочных инвестициях в акции роста, демонстрирует понимание базовых финансовых терминов, готов к умеренным рискам."
+}}
+
+**ВАЖНО:**
+- Используй ТОЛЬКО значения из списка выше
+- Поле `risk_score` должно быть от 0 до 10 (0 = минимальный риск, 10 = максимальный)
+- Поле `investment_horizon_months` должно соответствовать `investment_horizon`
+- Поле `reasoning` должно содержать краткое обоснование (1-2 предложения)
+"""
+
+        logger.debug("  ⏳ Запрос к LLM для анализа профиля...")
+        
+        from ..orchestrator import call_llm
+        response = call_llm(client, analysis_prompt)
+        
+        analysis_text = response.content[0].text.strip()
+        logger.debug(f"  ✓ Получен ответ от LLM ({len(analysis_text)} символов)")
+        
+        if "```json" in analysis_text:
+            analysis_text = analysis_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in analysis_text:
+            analysis_text = analysis_text.split("```")[1].split("```")[0].strip()
+        
+        analysis_result = json.loads(analysis_text)
+        
+        logger.info("=" * 80)
+        logger.info("📊 РЕЗУЛЬТАТ АНАЛИЗА ПРОФИЛЯ")
+        logger.info("=" * 80)
+        logger.info(f"  ├─ Склонность к риску: {analysis_result.get('risk_appetite')}")
+        logger.info(f"  ├─ Риск-скор: {analysis_result.get('risk_score')}/10")
+        logger.info(f"  ├─ Основная цель: {analysis_result.get('primary_goal')}")
+        logger.info(f"  ├─ Горизонт: {analysis_result.get('investment_horizon')} ({analysis_result.get('investment_horizon_months')} мес.)")
+        logger.info(f"  ├─ Уровень знаний: {analysis_result.get('financial_literacy')}")
+        logger.info(f"  └─ Обоснование: {analysis_result.get('reasoning', 'N/A')[:100]}...")
+        logger.info("=" * 80)
+        
+        logger.debug("  ⏳ Обновление профиля в базе данных...")
+        
+        update_data = {}
+        
+        if 'risk_appetite' in analysis_result and validate_risk_profile(analysis_result['risk_appetite']):
+            update_data['risk_tolerance'] = analysis_result['risk_appetite']
+        
+        if 'risk_score' in analysis_result:
+            update_data['risk_score'] = min(10, max(0, int(analysis_result['risk_score'])))
+        
+        if 'primary_goal' in analysis_result and validate_investment_goal(analysis_result['primary_goal']):
+            update_data['primary_goal'] = analysis_result['primary_goal']
+        
+        if 'investment_horizon_months' in analysis_result:
+            update_data['investment_horizon_months'] = int(analysis_result['investment_horizon_months'])
+        
+        if 'financial_literacy' in analysis_result:
+            valid_levels = ['beginner', 'intermediate', 'advanced', 'expert']
+            if analysis_result['financial_literacy'] in valid_levels:
+                update_data['knowledge_level'] = analysis_result['financial_literacy']
+        
+        if 'reasoning' in analysis_result:
+            current_prefs = current_profile.get('preferences', {})
+            current_prefs['last_analysis_reasoning'] = analysis_result['reasoning']
+            current_prefs['last_analysis_date'] = logger.handlers[0].formatter.formatTime(
+                logger.makeRecord('', 0, '', 0, '', (), None)
+            ) if logger.handlers else None
+            update_data['preferences'] = current_prefs
+        
+        if update_data:
+            await memory_bank.update_profile(**update_data)
+            logger.info(f"  ✅ Профиль обновлён ({len(update_data)} полей)")
+        else:
+            logger.warning("  ⚠️ Нет данных для обновления")
+        
+        logger.info("=" * 80)
+        logger.info("✅ АНАЛИЗ ПРОФИЛЯ ЗАВЕРШЁН")
+        logger.info("=" * 80)
+        
+        return analysis_result
+        
+    except json.JSONDecodeError as e:
+        logger.error("=" * 80)
+        logger.error("❌ ОШИБКА ПАРСИНГА JSON")
+        logger.error("=" * 80)
+        logger.error(f"  ├─ Ошибка: {e}")
+        logger.error(f"  └─ Ответ LLM: {analysis_text[:200]}...")
+        logger.error("=" * 80)
+        return None
+        
+    except Exception as e:
+        logger.error("=" * 80)
+        logger.error("❌ ОШИБКА АНАЛИЗА ПРОФИЛЯ")
+        logger.error("=" * 80)
+        logger.error(f"  ├─ Тип ошибки: {type(e).__name__}")
+        logger.error(f"  └─ Сообщение: {str(e)}", exc_info=True)
+        logger.error("=" * 80)
+        return None

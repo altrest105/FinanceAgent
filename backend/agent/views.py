@@ -46,7 +46,6 @@ class ChatAPIView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # ✅ ПОЛУЧАЕМ ДЕМО-ПОЛЬЗОВАТЕЛЯ ИЗ БД
             user = await get_demo_user()
             logger.info(f"👤 Пользователь: {user.username} (ID: {user.id})")
             
@@ -122,7 +121,6 @@ class TokenManagementAPIView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # ✅ ПОЛУЧАЕМ ДЕМО-ПОЛЬЗОВАТЕЛЯ ИЗ БД
             user = await get_demo_user()
             logger.info(f"👤 Сохранение токена для: {user.username}")
             
@@ -151,7 +149,6 @@ class TokenManagementAPIView(APIView):
         logger.info("🔍 GET /api/token/status/")
         
         try:
-            # ✅ ПОЛУЧАЕМ ДЕМО-ПОЛЬЗОВАТЕЛЯ ИЗ БД
             user = await get_demo_user()
             
             memory = MemoryBank(user)
@@ -188,7 +185,6 @@ class ConversationHistoryAPIView(APIView):
         logger.info("📜 GET /api/history/")
         
         try:
-            # ✅ ПОЛУЧАЕМ ДЕМО-ПОЛЬЗОВАТЕЛЯ ИЗ БД
             user = await get_demo_user()
             
             limit = int(request.query_params.get('limit', 20))

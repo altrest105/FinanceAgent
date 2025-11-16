@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import faiss
-import asyncio
 import os
 from openai import AsyncOpenAI
 from django.conf import settings
@@ -12,9 +11,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Конфигурация
-TOP_K = 3
-TOP_K_BEFORE_RERANK = 20
-BATCH_SIZE = 100
+TOP_K = settings.RAG_CONFIG.get("top_k")
+TOP_K_BEFORE_RERANK = settings.RAG_CONFIG.get("top_k_before_rerank")
+BATCH_SIZE = settings.RAG_CONFIG.get("batch_size")
 
 # Глобальные переменные
 _retriever = None

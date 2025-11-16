@@ -11,12 +11,9 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import logging
-import warnings
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-
-#warnings.filterwarnings("ignore", category=UserWarning)
 
 load_dotenv()
 
@@ -201,8 +198,18 @@ LOGGING = {
     'loggers': {
         'agent': {
             'handlers': ['console'],
-            'level': 'DEBUG',
+            'level': f'{os.getenv("AGENT_LOG_LEVEL", "DEBUG")}',
             'propagate': False,
         },
     },
+}
+
+# RAG Configuration
+RAG_CONFIG = {
+    'embedder_model_name': os.getenv('EMBEDDER_MODEL', 'BAAI/bge-m3'),
+    'reranker_model_name': os.getenv('RERANKER_MODEL', 'BAAI/bge-reranker-v2-m3'),
+    'top_k': int(os.getenv('TOP_K', '3')),
+    'top_k_before_rerank': int(os.getenv('TOP_K_BEFORE_RERANK', '20')),
+    'batch_size': int(os.getenv('BATCH_SIZE', '100')),
+    'use_rag': os.getenv('USE_RAG', '0') == '1',
 }
