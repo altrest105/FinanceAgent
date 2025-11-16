@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
+import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
@@ -55,7 +56,7 @@ function App() {
 
     try {
       const res = await axios.post<{ answer: string; showGraph?: boolean; graphData?: any }>(
-        'api',
+        'http://127.0.0.1:8000/api/chat/',
         { question: input }
       )
 
@@ -75,12 +76,47 @@ function App() {
   const codeComponent = ({ inline, className, children, ...props }: any) => {
     const match = /language-(\w+)/.exec(className || '')
     return !inline && match ? (
-      <SyntaxHighlighter style={vscDarkPlus} language={match[1]} PreTag="div" {...props}>
+      <SyntaxHighlighter
+        style={vscDarkPlus}
+        language={match[1]}
+        PreTag="div"
+        {...props}
+      >
         {String(children).replace(/\n$/, '')}
       </SyntaxHighlighter>
     ) : (
-      <code className={className} {...props}>{children}</code>
+      <code className={className} {...props}>
+        {children}
+      </code>
     )
+  }
+
+  // 🔹 Потом объявляем markdownComponents
+  const markdownComponents: Components = {
+    h1: ({ children }) => <h1 className="md-h1">{children}</h1>,
+    h2: ({ children }) => <h2 className="md-h2">{children}</h2>,
+    h3: ({ children }) => <h3 className="md-h3">{children}</h3>,
+    p: ({ children }) => <p className="md-p">{children}</p>,
+    strong: ({ children }) => <strong className="md-strong">{children}</strong>,
+    em: ({ children }) => <em className="md-em">{children}</em>,
+    ul: ({ children }) => <ul className="md-ul">{children}</ul>,
+    ol: ({ children }) => <ol className="md-ol">{children}</ol>,
+    li: ({ children }) => <li className="md-li">{children}</li>,
+    blockquote: ({ children }) => (
+      <blockquote className="md-blockquote">{children}</blockquote>
+    ),
+    a: ({ children, href }) => (
+      <a className="md-link" href={href} target="_blank" rel="noreferrer">
+        {children}
+      </a>
+    ),
+    table: ({ children }) => <table className="md-table">{children}</table>,
+    thead: ({ children }) => <thead className="md-thead">{children}</thead>,
+    tbody: ({ children }) => <tbody className="md-tbody">{children}</tbody>,
+    tr: ({ children }) => <tr className="md-tr">{children}</tr>,
+    th: ({ children }) => <th className="md-th">{children}</th>,
+    td: ({ children }) => <td className="md-td">{children}</td>,
+    code: codeComponent, // теперь доступна
   }
 
   return (
@@ -94,7 +130,7 @@ function App() {
               <img src="src/assets/icons/broke-icon.png" alt="" className="robot-icon" />
             </div>
             <div>
-              <span>GM Advisor</span>
+              <span>Finance Advisor</span>
               <small>AI-консультант по инвестициям</small>
             </div>
           </div>
@@ -124,7 +160,10 @@ function App() {
                     
                     {msg.role === 'assistant' ? (
                       <div className="bubble-content">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: codeComponent }}>
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={markdownComponents}
+                        >
                           {msg.content}
                         </ReactMarkdown>
 
