@@ -128,7 +128,7 @@ function App() {
                           {msg.content}
                         </ReactMarkdown>
 
-                        {msg.showGraph && (
+                        {/* {msg.showGraph && (
                           <motion.button
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -137,7 +137,7 @@ function App() {
                           >
                             <img src="src/assets/icons/graph-icon.png" alt="" className="graph-icon" />
                           </motion.button>
-                        )}
+                        )} */}
                       </div>
                     ) : (
                       <p>{msg.content}</p>
