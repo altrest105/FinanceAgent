@@ -14,14 +14,38 @@ interface Message {
   showGraph?: boolean
 }
 
+declare interface SpeechRecognition extends EventTarget {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  maxAlternatives: number
+  start(): void
+  stop(): void
+  abort(): void
+  onaudiostart: ((this: SpeechRecognition, ev: Event) => any) | null
+  onsoundstart: ((this: SpeechRecognition, ev: Event) => any) | null
+  onspeechstart: ((this: SpeechRecognition, ev: Event) => any) | null
+  onresult: ((this: SpeechRecognition, ev: SpeechRecognitionEvent) => any) | null
+  onerror: ((this: SpeechRecognition, ev: Event) => any) | null
+  onend: ((this: SpeechRecognition, ev: Event) => any) | null;
+}
+
+declare interface Window {
+  SpeechRecognition: new () => SpeechRecognition
+  webkitSpeechRecognition: new () => SpeechRecognition
+}
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const [isRecording, setIsRecording] = useState(false)
+  const recognitionRef = useRef<SpeechRecognition | null>(null)
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // История чата
   useEffect(() => {
     const saved = localStorage.getItem('chatHistory')
     if (saved) setMessages(JSON.parse(saved))
@@ -31,12 +55,10 @@ function App() {
     localStorage.setItem('chatHistory', JSON.stringify(messages))
   }, [messages])
 
-  // Скролл вниз
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Авторесайз textarea
   useEffect(() => {
     const textarea = textareaRef.current
     if (textarea) {
@@ -46,6 +68,37 @@ function App() {
       textarea.style.height = `${newHeight}px`
     }
   }, [input])
+
+  useEffect(() => {
+    const SR =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+
+    if (!SR) {
+      console.warn('SpeechRecognition не поддерживается в этом браузере')
+      return
+    }
+
+    const rec: SpeechRecognition = new SR()
+    rec.lang = 'ru-RU'
+    rec.interimResults = false
+    rec.maxAlternatives = 1
+
+    rec.onresult = (event: SpeechRecognitionEvent) => {
+      const text = event.results[0][0].transcript
+      setInput(prev => (prev ? prev + ' ' + text : text))
+    }
+
+    rec.onerror = (event: Event) => {
+      console.error('Speech recognition error', event)
+      setIsRecording(false)
+    }
+
+    rec.onend = () => {
+      setIsRecording(false)
+    }
+
+    recognitionRef.current = rec
+  }, [])
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return
@@ -73,6 +126,22 @@ function App() {
     }
   }
 
+  const handleMicClick = () => {
+    const rec = recognitionRef.current
+    if (!rec) {
+      alert('Распознавание речи не поддерживается в этом браузере')
+      return
+    }
+
+    if (isRecording) {
+      rec.stop()
+      setIsRecording(false)
+    } else {
+      rec.start()
+      setIsRecording(true)
+    }
+  }
+
   const codeComponent = ({ inline, className, children, ...props }: any) => {
     const match = /language-(\w+)/.exec(className || '')
     return !inline && match ? (
@@ -91,7 +160,6 @@ function App() {
     )
   }
 
-  // 🔹 Потом объявляем markdownComponents
   const markdownComponents: Components = {
     h1: ({ children }) => <h1 className="md-h1">{children}</h1>,
     h2: ({ children }) => <h2 className="md-h2">{children}</h2>,
@@ -116,7 +184,7 @@ function App() {
     tr: ({ children }) => <tr className="md-tr">{children}</tr>,
     th: ({ children }) => <th className="md-th">{children}</th>,
     td: ({ children }) => <td className="md-td">{children}</td>,
-    code: codeComponent, // теперь доступна
+    code: codeComponent,
   }
 
   return (
@@ -147,7 +215,9 @@ function App() {
         {/* MESSAGES */}
         <div className="messages-container">
           <div className="messages">
-            {messages.length === 0 && <div className="empty">Задайте финансовый вопрос...</div>}
+            {messages.length === 0 && (
+              <div className="empty">Задайте финансовый вопрос...</div>
+            )}
 
             <AnimatePresence>
               {messages.map((msg, i) => (
@@ -157,9 +227,12 @@ function App() {
                   animate={{ opacity: 1, y: 0 }}
                   className={`message-bubble ${msg.role}`}
                 >
-                  {msg.role === 'assistant' && <div className="ai-icon"> <img src="src/assets/icons/robot-icon.png" alt="" className="robot-icon-baby" /> </div>}
+                  {msg.role === 'assistant' && (
+                    <div className="ai-icon">
+                      <img src="src/assets/icons/robot-icon.png" alt="" className="robot-icon-baby" />
+                    </div>
+                  )}
                   <div className="bubble-content">
-                    
                     {msg.role === 'assistant' ? (
                       <div className="bubble-content">
                         <ReactMarkdown
@@ -168,29 +241,21 @@ function App() {
                         >
                           {msg.content}
                         </ReactMarkdown>
-
-                        {/* {msg.showGraph && (
-                          <motion.button
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="graph-button-inline"
-                            onClick={() => alert('График будет здесь!')}
-                          >
-                            <img src="src/assets/icons/graph-icon.png" alt="" className="graph-icon" />
-                          </motion.button>
-                        )} */}
                       </div>
                     ) : (
                       <p>{msg.content}</p>
                     )}
-                  
                   </div>
                 </motion.div>
               ))}
             </AnimatePresence>
 
             {loading && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="message-bubble assistant">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="message-bubble assistant"
+              >
                 <div className="ai-icon">
                   <img src="src/assets/icons/robot-icon.png" alt="" className="robot-icon-baby" />
                 </div>
@@ -220,7 +285,23 @@ function App() {
               rows={1}
               disabled={loading}
             />
-            <button onClick={sendMessage} disabled={loading} className="send-button">
+
+            {/* Кнопка микрофона */}
+            <button
+              type="button"
+              onClick={handleMicClick}
+              disabled={loading}
+              className={`mic-button ${isRecording ? 'recording' : ''}`}
+            >
+              🎙
+            </button>
+
+            {/* Кнопка отправки */}
+            <button
+              onClick={sendMessage}
+              disabled={loading}
+              className="send-button"
+            >
               <img src="src/assets/icons/send-icon.png" alt="" className="send-icon" />
             </button>
           </div>
