@@ -1,7 +1,7 @@
 from django.apps import AppConfig
 import logging
 import asyncio
-import os
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +10,6 @@ class AgentConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'agent'
     
-    # Глобальные клиенты и модели
     llm_client = None
     embedder_model = None
     reranker_model = None
@@ -20,59 +19,52 @@ class AgentConfig(AppConfig):
         """Инициализация при старте приложения"""
         import sys
         
-        # Пропускаем инициализацию при миграциях и других командах
         skip_commands = ['migrate', 'makemigrations', 'createsuperuser', 'collectstatic', 'shell']
         if any(cmd in sys.argv for cmd in skip_commands):
-            logger.info("⏭️ Пропуск инициализации RAG (команда управления)")
+            logger.info("⏭️ Пропуск инициализации ИИ-Агента (команда управления)")
             return
         
-        # Инициализируем только при запуске сервера
         if 'runserver' in sys.argv or 'gunicorn' in sys.argv[0]:
             logger.info("=" * 80)
-            logger.info("🚀 АВТОМАТИЧЕСКАЯ ИНИЦИАЛИЗАЦИЯ RAG СИСТЕМЫ")
+            logger.info("🚀 АВТОМАТИЧЕСКАЯ ИНИЦИАЛИЗАЦИЯ ИИ-АГЕНТА")
             logger.info("=" * 80)
             
             try:
-                # Инициализация RAG системы
-                from .services.rag import initialize_rag
                 
-                # Запускаем асинхронную инициализацию
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 loop.run_until_complete(self._init_rag_system())
                 loop.close()
                 
                 logger.info("=" * 80)
-                logger.info("✅ RAG СИСТЕМА ГОТОВА К РАБОТЕ")
+                logger.info("✅ ИИ-АГЕНТ ГОТОВ К РАБОТЕ")
                 logger.info("=" * 80)
                 
             except Exception as e:
                 logger.error("=" * 80)
-                logger.error("❌ КРИТИЧЕСКАЯ ОШИБКА ИНИЦИАЛИЗАЦИИ RAG")
+                logger.error("❌ КРИТИЧЕСКАЯ ОШИБКА ИНИЦИАЛИЗАЦИИ ИИ-АГЕНТА")
                 logger.error("=" * 80)
                 logger.error(f"Тип: {type(e).__name__}")
                 logger.error(f"Сообщение: {str(e)}", exc_info=True)
                 logger.error("=" * 80)
                 
-                # Не падаем, чтобы Django мог стартовать
-                logger.warning("⚠️ Сервер запущен БЕЗ RAG системы!")
+                logger.warning("⚠️ Сервер запущен БЕЗ ИИ-Агента!")
     
     async def _init_rag_system(self):
-        """Асинхронная инициализация RAG системы"""
+        """Асинхронная инициализация ИИ-Агента"""
         from django.conf import settings
         from openai import AsyncOpenAI
         from .services.rag import (
             initialize_rag,
             LocalEmbedder,
             LocalReranker,
-            KnowledgeBaseRetriever
         )
         
         logger.info("=" * 80)
         logger.info("🔧 ЭТАП 1: ИНИЦИАЛИЗАЦИЯ LLM КЛИЕНТА")
         logger.info("=" * 80)
         
-        # 1. Инициализация LLM клиента
+        # Инициализация LLM клиента
         try:
             self.__class__.llm_client = AsyncOpenAI(
                 base_url=settings.LLM_CONFIG.get("base_url"),
@@ -89,26 +81,29 @@ class AgentConfig(AppConfig):
         logger.info("🔧 ЭТАП 2: ЗАГРУЗКА ЛОКАЛЬНЫХ МОДЕЛЕЙ")
         logger.info("=" * 80)
         
-        # 2. Инициализация локального эмбеддера
+        if not settings.RAG_CONFIG.get("use_rag"):
+            logger.info("  ⏭️ RAG система отключена в настройках. Пропуск загрузки локальных моделей.")
+            logger.info("=" * 80)
+            logger.info("🎉 ВСЕ КОМПОНЕНТЫ УСПЕШНО ЗАГРУЖЕНЫ")
+            logger.info("=" * 80)
+            logger.info(f"  └─ LLM клиент: ✅")
+            logger.info("=" * 80)
+            return
+        
+        # Инициализация локального эмбеддера
         try:
             logger.info("  ⏳ Загрузка эмбеддера...")
-            embedder_model_name = os.getenv(
-                "EMBEDDER_MODEL", 
-                "intfloat/multilingual-e5-large"
-            )
+            embedder_model_name = settings.RAG_CONFIG.get("embedder_model_name")
             self.__class__.embedder_model = LocalEmbedder(model_name=embedder_model_name)
             logger.info(f"  ✅ Эмбеддер загружен: {embedder_model_name}")
         except Exception as e:
             logger.error(f"  ❌ Ошибка загрузки эмбеддера: {e}")
             raise
         
-        # 3. Инициализация локального реранкера
+        # Инициализация локального реранкера
         try:
             logger.info("  ⏳ Загрузка реранкера...")
-            reranker_model_name = os.getenv(
-                "RERANKER_MODEL", 
-                "BAAI/bge-reranker-v2-m3"
-            )
+            reranker_model_name = settings.RAG_CONFIG.get("reranker_model_name")
             self.__class__.reranker_model = LocalReranker(model_name=reranker_model_name)
             logger.info(f"  ✅ Реранкер загружен: {reranker_model_name}")
         except Exception as e:
@@ -119,18 +114,15 @@ class AgentConfig(AppConfig):
         logger.info("🔧 ЭТАП 3: ИНИЦИАЛИЗАЦИЯ БАЗЫ ЗНАНИЙ")
         logger.info("=" * 80)
         
-        # 4. Инициализация базы знаний и retriever
+        # Инициализация базы знаний и retriever
         try:
-            # Передаём загруженные модели в RAG систему
             import agent.services.rag as rag_module
             rag_module._local_embedder = self.__class__.embedder_model
             rag_module._local_reranker = self.__class__.reranker_model
             rag_module._llm_client = self.__class__.llm_client
             
-            # Инициализируем базу знаний
             await initialize_rag(force_rebuild=False)
             
-            # Сохраняем retriever в AppConfig
             self.__class__.retriever = rag_module._retriever
             
             logger.info(f"  ✅ База знаний инициализирована")
@@ -149,8 +141,7 @@ class AgentConfig(AppConfig):
         logger.info(f"  └─ База знаний: ✅")
         logger.info("=" * 80)
 
-
-# Глобальные функции-хелперы для доступа к ресурсам
+# Утилиты
 def get_llm_client():
     """Получить LLM клиент"""
     if AgentConfig.llm_client is None:
@@ -193,6 +184,8 @@ def get_retriever():
 
 def is_rag_ready():
     """Проверить готовность RAG системы"""
+    if not settings.RAG_CONFIG.get("use_rag"):
+        return AgentConfig.llm_client is not None
     return all([
         AgentConfig.llm_client is not None,
         AgentConfig.embedder_model is not None,

@@ -8,13 +8,13 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from asgiref.sync import sync_to_async
 
-# Импорт сервисов
 from .services.rag import get_rag_context
 from .services.tinvest import (
-    search_instrument, 
     place_order, 
     get_portfolio_summary,
-    get_accounts
+    get_accounts,
+    get_multiple_instruments_info,
+    format_multiple_instruments_for_llm
 )
 from .services.memorybank import MemoryBank, get_or_request_token, extract_token_from_message
 from .apps import is_rag_ready, get_llm_client
@@ -50,7 +50,6 @@ async def get_demo_user():
             is_superuser=False
         )
         
-        # Устанавливаем пароль
         await sync_to_async(user.set_password)('demo123456')
         await sync_to_async(user.save)()
         
@@ -64,9 +63,9 @@ async def get_demo_user():
 
 class IntentType(Enum):
     """Типы намерений пользователя"""
-    TRADE = "trade"                      # 1️⃣ Купить/продать ценные бумаги
-    SECURITIES_INFO = "securities_info"  # 2️⃣ Вопрос ПРО ценные бумаги (новости, аналитика)
-    GENERAL = "general"                  # 3️⃣ Вопрос НЕ про ценные бумаги (финансы, право, услуги)
+    TRADE = "trade" # Купить/продать ценные бумаги
+    SECURITIES_INFO = "securities_info" # Вопрос ПРО ценные бумаги (новости, аналитика)
+    GENERAL = "general" # Вопрос НЕ про ценные бумаги (финансы, право, услуги)
 
 
 class TradeAction(Enum):
@@ -84,20 +83,22 @@ def build_intent_classification_prompt(question):
     return f"""Определи намерение пользователя на основе его вопроса.
 
 Возможные намерения:
-1. TRADE - пользователь хочет КУПИТЬ или ПРОДАТЬ ценные бумаги (явное действие: "купи", "продай", "размести заявку")
-2. SECURITIES_INFO - вопрос ПРО конкретные ценные бумаги (новости, котировки, аналитика, компании, вопросы про инвестиционный портфель пользователя)
-3. GENERAL - общие вопросы НЕ про ценные бумаги (финансы, право, налоги, услуги)
+1. TRADE - пользователь хочет КУПИТЬ или ПРОДАТЬ ценные бумаги (явное намерение купить или продать ценную бумагу: "размести заявку", "давай купим", "купи", "продай", "продадим" и тому подобное)
+2. SECURITIES_INFO - вопрос ПРО конкретные ценные бумаги, анализ портфеля пользователя, совет по инвестициям (новости, котировки, аналитика, компании, вопросы про инвестиционный портфель пользователя)
+3. GENERAL - общие вопросы НЕ про ценные бумаги или инвестиции (финансы, право, налоги, услуги)
 
 Примеры TRADE:
 - "Купи 10 акций Яндекса" -> TRADE
 - "Продай Сбербанк по 280 рублей" -> TRADE
 - "Размести заявку на покупку Газпрома" -> TRADE
 - "Давай продадим LKOH" -> TRADE
+- "Покупаем 3 акции SBER" -> TRADE
 
 Примеры SECURITIES_INFO:
 - "Какие новости по Сбербанку?" -> SECURITIES_INFO
 - "Что происходит с акциями GAZP?" -> SECURITIES_INFO
 - "Какая цена акций Яндекса?" -> SECURITIES_INFO
+- "Проанализируй мой инвестиционный портфель" -> SECURITIES_INFO
 - "Анализ компании Apple" -> SECURITIES_INFO
 - "Почему упал LKOH?" -> SECURITIES_INFO
 
@@ -163,8 +164,10 @@ def build_securities_extraction_prompt(question):
 def build_general_answer_prompt(question, rag_context=""):
     """Промпт для ответа на ОБЩИЕ вопросы (НЕ про ценные бумаги)"""
     return f"""Ты — русскоязычный ИИ-ассистент, эксперт в области финансов, инвестиций, права и государственных услуг.
+Твои возможности - ответить на вопросы про налоги, бюджетирование, финансовое планирование и многое другое.
+Также ты умеешь анализировать инвестиционные портфели и давать общие советы по финансам, выставлять заявки на покупку и продажу ценных бумаг в Т-Инвестициях.
 
-Твоя задача — дать подробный, структурированный и максимально полезный ответ на вопрос пользователя. Ты должен основываться на предоставленном тебе контексте.
+Твоя задача — дать небольшой, структурированный и максимально полезный ответ на вопрос пользователя. Используй контекст, если он полезен.
 
 Правила твоего ответа:
 - Главный заголовок: Начинай ответ с основного заголовка, используя ###.
@@ -177,7 +180,7 @@ def build_general_answer_prompt(question, rag_context=""):
 - Выделение: Выделяй ключевые термины, определения, законы и важные цифры жирным шрифтом (**...**).
 - Синтез и Полнота: Не копируй текст из контекста слово в слово. Твоя цель — синтезировать информацию в единый, связный и легко читаемый ответ. КРИТИЧЕСКИ ВАЖНО: Дважды проверь, что твой ответ полностью покрывает все аспекты и ИСПОЛЬЗУЕТ ВСЮ РЕЛЕВАНТНУЮ ИНФОРМАЦИЮ из контекста для максимальной полноты.
 - Структурный вывод: Если уместно, завершай ответ практическим советом или кратким выводом, используя подзаголовок без нумерации (например, #### Рекомендации или #### Полезные советы).
-- Если ответа нет, постарайся ответить сам. Если и в таком случае недостаточно информации для ответа на вопрос, вежливо сообщи: "Извините, но сейчас я не могу дать ответ на ваш вопрос."
+- Если недостаточно информации для ответа на вопрос, вежливо сообщи: "Извините, но сейчас я не могу дать ответ на ваш вопрос."
 - СОХРАНЯЙ все переносы строк и пустые строки, чтобы обеспечить требуемую Markdown-структуру (заголовки, списки, таблицы) в ответе.
 
 Контекст:
@@ -187,28 +190,35 @@ def build_general_answer_prompt(question, rag_context=""):
 """
 
 
-def build_securities_answer_prompt(question, news_context=""):
+def build_securities_answer_prompt(question, securities_context="", user_portfolio="", user_data=""):
     """Промпт для ответа на вопросы ПРО ценные бумаги"""
     return f"""Ты — русскоязычный ИИ-ассистент, эксперт в области ценных бумаг, фондового рынка и финансовой аналитики.
 
-Твоя задача — дать подробный, структурированный ответ на вопрос пользователя о ценных бумагах, основываясь на предоставленных новостях и данных.
+Твоя задача — дать небольшой, структурированный ответ на вопрос пользователя о ценных бумагах. Если требуется, используй предоставленные данные об акциях и данные о пользователе.
 
 Правила твоего ответа:
 - Главный заголовок: Начинай ответ с основного заголовка, используя ###.
 - Подзаголовки: Используй ####. ОБЯЗАТЕЛЬНО нумеруй логические разделы (#### 1. **Компания А**, #### 2. **Компания Б**).
-- Актуальность: ОБЯЗАТЕЛЬНО упоминай даты новостей и событий.
-- Источники: Если в новостях есть конкретные данные (цены, проценты), указывай их.
+- Достоверность: Указывай источники информации и дату получения.
+- Если есть конкретные данные (цены, проценты), указывай их.
 - Таблицы: Для сравнения котировок используй таблицы в формате Markdown.
 - Выделение: Выделяй важные цифры, даты, изменения цен жирным шрифтом (**...**).
-- Объективность: Представляй разные точки зрения, если они есть в новостях.
-- Если новостей недостаточно, честно сообщи об этом и предложи, что ещё ты можешь сделать.
+- Если данных недостаточно, честно сообщи об этом.
+- В конце, если уместно, сделай какие-то практические рекомендации по действиям пользователя с его портфелем или ценными бумагами, чтобы было связано с вопросом.
+- Сохраняй форматирование Markdown (заголовки, списки, таблицы) в ответе.
+- В конце добавь "Не инвестиционная рекомендация."
+- Не говори, что пользователь тебе что-то предоставил. Он лишь задал вопрос.
 
-Новости и данные о портфеле:
-{news_context}
+Данные об акциях, источник "T-Инвестиции", актуальные в данный момент:
+{securities_context}
 
-Вопрос пользователя: {question}
+Портфель пользователя:
+{user_portfolio}
 
-Дай структурированный ответ с акцентом на актуальность и конкретные данные."""
+Данные о пользователе:
+{user_data}
+
+Вопрос пользователя: {question}"""
 
 
 # ============================================================================
@@ -295,7 +305,6 @@ async def extract_trade_params(question, client):
         return None
     
     try:
-        # Очистка JSON из Markdown
         if "```json" in response:
             response = response.split("```json")[1].split("```")[0].strip()
         elif "```" in response:
@@ -327,7 +336,6 @@ async def extract_securities_info(question, client):
         return None
     
     try:
-        # Очистка JSON из Markdown
         if "```json" in response:
             response = response.split("```json")[1].split("```")[0].strip()
         elif "```" in response:
@@ -345,40 +353,75 @@ async def extract_securities_info(question, client):
         return None
 
 
-async def fetch_news_for_securities(securities_info):
-    """
-    Получение новостей для ценных бумаг
-    TODO: Интеграция с новостным API
-    """
-    logger.info(f"📰 Получение новостей для ЦБ...")
-    logger.debug(f"  └─ Securities info: {securities_info}")
+def build_trade_clarification_prompt(question, params):
+    """Промпт для уточнения недостающих параметров торговой операции"""
+    missing = []
+    if not params.get("action"):
+        missing.append("действие (купить или продать)")
+    if not params.get("ticker"):
+        missing.append("тикер или название акции")
+    if not params.get("quantity"):
+        missing.append("количество акций")
     
-    tickers = securities_info.get("tickers", [])
-    companies = securities_info.get("companies", [])
+    missing_str = ", ".join(missing)
     
-    logger.warning("⚠️ Используются MOCK данные новостей (требуется реальная интеграция)")
+    return f"""Пользователь хочет совершить торговую операцию, но не указал все необходимые параметры.
+
+Исходный запрос: {question}
+Что уже известно: {json.dumps(params, ensure_ascii=False)}
+Что нужно уточнить: {missing_str}
+
+Твоя задача - вежливо попросить пользователя уточнить недостающие параметры.
+
+Правила:
+- Будь кратким и понятным
+- Приведи пример правильного запроса
+- Если цена не указана, это нормально (будет рыночная)
+- Используй Markdown форматирование
+- Не превышай 200 слов
+
+Пример ответа:
+"Понял, что вы хотите **купить акции Сбербанка**! 
+
+Для размещения заявки мне нужно знать **количество акций**.
+
+Пример: *Купи 10 акций Сбербанка* или *Купи 5 SBER по 280 рублей*"
+
+Сгенерируй вежливый ответ с просьбой уточнить параметры:"""
+
+
+async def clarify_trade_params(question, params, client):
+    """Генерация уточняющего вопроса для торговой операции"""
+    logger.info("❓ Генерация уточняющего вопроса...")
+    logger.info(f"  ├─ Параметры: {params}")
+    logger.info(f"  └─ Недостающие поля: {[k for k, v in params.items() if not v]}")
     
-    # TODO: Здесь должна быть реальная интеграция с API новостей
-    mock_news = f"""
-📰 Последние новости по запрошенным компаниям ({', '.join(tickers if tickers else companies)}):
-
-1. **Сбербанк (SBER)** - 15.11.2024
-   - Цена закрытия: **285.50 руб** (+2.3%)
-   - Объявлены квартальные результаты, прибыль выросла на 15%
-   - Объём торгов: 12.3 млрд руб
-   
-2. **Газпром (GAZP)** - 15.11.2024
-   - Цена закрытия: **168.20 руб** (-0.8%)
-   - Компания объявила о новых контрактах на поставку газа
-   - Дивиденды: планируется выплата 12 руб на акцию
-
-⚠️ Данные приведены для примера. Требуется интеграция с реальным источником новостей.
-"""
+    prompt = build_trade_clarification_prompt(question, params)
+    clarification = await call_llm(client, prompt, max_tokens=500)
     
-    return mock_news
+    if not clarification:
+        logger.warning("⚠️ Не удалось сгенерировать уточняющий вопрос, используем стандартный")
+        missing_parts = []
+        if not params.get("action"):
+            missing_parts.append("- **Действие**: купить или продать?")
+        if not params.get("ticker"):
+            missing_parts.append("- **Акция**: какой тикер или название компании?")
+        if not params.get("quantity"):
+            missing_parts.append("- **Количество**: сколько акций?")
+        
+        clarification = f"""❓ **Для размещения заявки нужно уточнить:**
+
+{chr(10).join(missing_parts)}
+
+💡 **Пример:** *Купи 10 акций Сбербанка по 280 рублей*
+
+Если цену не указывать, заявка будет размещена по рыночной цене."""
+    
+    logger.info(f"  ✓ Уточняющий вопрос сгенерирован ({len(clarification)} символов)")
+    return clarification
 
 
-async def execute_trade(params, token):
+async def execute_trade(params, token, client, question):
     """Выполнение торговой операции через Tinkoff API"""
     logger.info("💳 Выполнение торговой операции...")
     logger.info(f"  └─ Параметры: {params}")
@@ -389,14 +432,19 @@ async def execute_trade(params, token):
     price = params.get("price")
     
     if not all([action, ticker, quantity]):
-        logger.error("❌ Недостаточно параметров для торговли")
+        logger.warning("⚠️ Недостаточно параметров для торговли")
+        logger.info("  └─ Генерация уточняющего вопроса...")
+        
+        clarification = await clarify_trade_params(question, params, client)
+        
         return {
             "success": False,
-            "message": "❌ Недостаточно параметров для выполнения операции.\n\n**Укажите:**\n- Действие (купить/продать)\n- Тикер или название акции\n- Количество акций\n\n*Пример: Купи 10 акций Сбербанка по 280 рублей*"
+            "needs_clarification": True,
+            "message": clarification,
+            "partial_params": params
         }
     
     try:
-        # Получаем первый счет
         logger.info("  ⏳ Получение списка счетов...")
         accounts = await get_accounts(token)
         if not accounts:
@@ -408,21 +456,36 @@ async def execute_trade(params, token):
         account_id = accounts[0]["id"]
         logger.info(f"  ✓ Используется счёт: {account_id}")
         
-        # Ищем инструмент по тикеру
-        logger.info(f"  ⏳ Поиск инструмента {ticker}...")
-        instruments = await search_instrument(token, ticker)
-        if not instruments:
-            logger.error(f"  ❌ Инструмент {ticker} не найден")
+        logger.info(f"  ⏳ Поиск доступного для торговли инструмента {ticker}...")
+        
+        from .services.tinvest import get_instrument_by_ticker
+        instrument = await get_instrument_by_ticker(token, ticker)
+        
+        if not instrument:
+            logger.error(f"  ❌ Доступный инструмент {ticker} не найден")
             return {
                 "success": False,
-                "message": f"❌ Инструмент с тикером **{ticker}** не найден.\n\nПроверьте правильность написания тикера."
+                "message": f"""❌ **Инструмент '{ticker}' не найден или недоступен для торговли.**
+
+**Возможные причины:**
+- Тикер указан неправильно
+- Инструмент не доступен через API
+- Требуется статус квалифицированного инвестора
+
+**Попробуйте:**
+- Проверить правильность тикера
+- Указать полное название компании
+- Выбрать другой инструмент
+
+*Пример: Купи 10 акций Сбербанка* (вместо `{ticker}`*)"""
             }
         
-        figi = instruments[0]["figi"]
-        instrument_name = instruments[0].get("name", ticker)
-        logger.info(f"  ✓ Найден: {instrument_name} (FIGI: {figi})")
+        instrument_name = instrument.get("name", ticker)
+        figi = instrument.get("figi")
         
-        # Размещаем заявку
+        logger.info(f"  ✓ Найден доступный инструмент: {instrument_name}")
+        logger.info(f"    └─ FIGI: {figi}")
+        
         order_type = "limit" if price else "market"
         logger.info(f"  ⏳ Размещение {order_type} заявки...")
         
@@ -452,11 +515,17 @@ async def execute_trade(params, token):
 - Количество: **{quantity}** шт.
 - Цена: {price_text}
 - ID заявки: `{result.get('order_id')}`
+- FIGI: `{figi}`
 
 Заявка отправлена в биржу и будет исполнена согласно условиям рынка.""",
             "order_id": result.get("order_id"),
             "params": params,
-            "result": result
+            "result": result,
+            "instrument": {
+                "name": instrument_name,
+                "ticker": ticker,
+                "figi": figi
+            }
         }
         
     except Exception as e:
@@ -476,15 +545,14 @@ async def process_question(question, user=None, account_id=None, session_id=None
     Главная функция-оркестратор для обработки вопроса пользователя
     
     3 ОСНОВНЫХ СЦЕНАРИЯ:
-    1️⃣ TRADE - Купить/продать ценные бумаги
-    2️⃣ SECURITIES_INFO - Вопрос ПРО ценные бумаги (новости, котировки)
-    3️⃣ GENERAL - Вопрос НЕ про ценные бумаги (финансы, право, услуги)
+    TRADE - Купить/продать ценные бумаги
+    SECURITIES_INFO - Вопрос ПРО ценные бумаги (новости, котировки)
+    GENERAL - Вопрос НЕ про ценные бумаги (финансы, право, услуги)
     """
     logger.info("=" * 80)
     logger.info("🎬 ЗАПУСК ОРКЕСТРАТОРА")
     logger.info("=" * 80)
     
-    # ✅ ПОЛУЧАЕМ ДЕМО-ПОЛЬЗОВАТЕЛЯ ИЗ БД
     if user is None or not hasattr(user, 'is_authenticated') or not user.is_authenticated:
         user = await get_demo_user()
         logger.info(f"  ├─ 👤 Демо-пользователь из БД: {user.username} (ID: {user.id})")
@@ -494,7 +562,6 @@ async def process_question(question, user=None, account_id=None, session_id=None
     logger.info(f"  ├─ Вопрос: {question[:100]}...")
     logger.info(f"  └─ Session ID: {session_id or 'N/A'}")
     
-    # Проверяем готовность RAG системы
     if not is_rag_ready():
         logger.error("❌ RAG система не готова!")
         return {
@@ -503,17 +570,14 @@ async def process_question(question, user=None, account_id=None, session_id=None
             "answer": "Извините, система временно недоступна. Попробуйте позже."
         }
     
-    # Инициализируем MemoryBank (БЕЗ session_id в конструкторе)
     logger.info("💾 Инициализация MemoryBank...")
     memory = MemoryBank(user)
     logger.info(f"  └─ MemoryBank готов для {user.username}")
     
-    # Получаем LLM клиент из AppConfig
     client = get_llm_client()
     logger.info("🔌 LLM клиент получен из AppConfig")
     
     try:
-        # 🔑 ПРОВЕРКА НА ТОКЕН В СООБЩЕНИИ
         logger.info("🔍 Проверка на наличие токена в сообщении...")
         potential_token = await extract_token_from_message(question)
         
@@ -532,33 +596,35 @@ async def process_question(question, user=None, account_id=None, session_id=None
         
         logger.info("  └─ Токен не обнаружен, продолжаем обработку вопроса")
         
-        # 1️⃣ ОПРЕДЕЛЯЕМ НАМЕРЕНИЕ (3 СЦЕНАРИЯ)
         intent = await classify_intent(question, client)
         
-        # Получаем контекст из истории
         logger.info("📜 Получение контекста из истории диалогов...")
         conversation_context = await memory.get_relevant_context(question, top_k=3)
         logger.info(f"  └─ Контекст: {len(conversation_context)} символов")
         
         
         # ====================================================================
-        # СЦЕНАРИЙ 1️⃣: ТОРГОВАЯ ОПЕРАЦИЯ (TRADE)
+        # СЦЕНАРИЙ 1: ТОРГОВАЯ ОПЕРАЦИЯ (TRADE)
         # ====================================================================
         if intent == IntentType.TRADE:
             logger.info("=" * 80)
             logger.info("1️⃣ СЦЕНАРИЙ: ТОРГОВАЯ ОПЕРАЦИЯ")
             logger.info("=" * 80)
             
-            # Извлекаем параметры торговли
             params = await extract_trade_params(question, client)
             
             if not params:
                 logger.warning("⚠️ Не удалось извлечь параметры торговли")
-                answer = "❌ Не удалось определить параметры торговой операции.\n\n**Пожалуйста, уточните:**\n- Какую акцию (тикер или название)?\n- Сколько акций?\n- По какой цене (или по рыночной)?\n\n*Пример: Купи 10 акций Сбербанка по 280 рублей*"
-                await memory.save_conversation(question, answer, intent.value, session_id=session_id)
-                return {"intent": intent.value, "success": False, "answer": answer}
+                clarification = await clarify_trade_params(question, {}, client)
+                
+                await memory.save_conversation(question, clarification, intent.value, session_id=session_id)
+                return {
+                    "intent": intent.value,
+                    "success": False,
+                    "needs_clarification": True,
+                    "answer": clarification
+                }
             
-            # Проверяем наличие токена
             logger.info("🔐 Проверка наличия токена для торговли...")
             token = await get_or_request_token(memory)
             
@@ -570,8 +636,28 @@ async def process_question(question, user=None, account_id=None, session_id=None
             
             logger.info("  ✓ Токен найден, выполняем торговлю")
             
-            # Выполняем операцию
-            trade_result = await execute_trade(params, token)
+            trade_result = await execute_trade(params, token, client, question)
+            
+            if trade_result.get("needs_clarification"):
+                await memory.save_conversation(
+                    question=question,
+                    answer=trade_result["message"],
+                    intent=intent.value,
+                    extracted_data={"partial_params": trade_result.get("partial_params")},
+                    session_id=session_id
+                )
+                
+                logger.info("=" * 80)
+                logger.info("❓ ТРЕБУЕТСЯ УТОЧНЕНИЕ ПАРАМЕТРОВ")
+                logger.info("=" * 80)
+                
+                return {
+                    "intent": intent.value,
+                    "success": False,
+                    "needs_clarification": True,
+                    "partial_params": trade_result.get("partial_params"),
+                    "answer": trade_result["message"]
+                }
             
             await memory.save_conversation(
                 question=question,
@@ -594,22 +680,41 @@ async def process_question(question, user=None, account_id=None, session_id=None
         
         
         # ====================================================================
-        # СЦЕНАРИЙ 2️⃣: ВОПРОС ПРО ЦЕННЫЕ БУМАГИ (SECURITIES_INFO)
+        # СЦЕНАРИЙ 2: ВОПРОС ПРО ЦЕННЫЕ БУМАГИ (SECURITIES_INFO)
         # ====================================================================
         elif intent == IntentType.SECURITIES_INFO:
             logger.info("=" * 80)
             logger.info("2️⃣ СЦЕНАРИЙ: ВОПРОС ПРО ЦЕННЫЕ БУМАГИ")
             logger.info("=" * 80)
             
-            # Извлекаем информацию о ценных бумагах
             securities_info = await extract_securities_info(question, client)
             
-            # Получаем новости
-            news_context = await fetch_news_for_securities(securities_info or {})
-            
-            # Опционально: добавляем данные портфеля, если есть токен
-            portfolio_info = ""
+            logger.info("🔐 Получение токена для запроса данных о ценных бумагах...")
             token = await get_or_request_token(memory)
+            
+            if not token:
+                logger.warning("⚠️ Токен не найден")
+                answer = "⚠️ **Для получения актуальных данных о ценных бумагах необходим API токен Tinkoff.**\n\n**Как получить токен:**\n1. Перейдите в [настройки профиля Т-Инвестиции](https://www.tbank.ru/invest/settings/) и авторизуйтесь в системе, если это требуется.\nФункция **Подтверждение сделок кодом** должна быть отключена\n2. Выпустите токен T-Invest API для биржи **с полным доступом**\n3. Скопируйте и отправьте мне токен в чат (он будет надёжно зашифрован)\n\n*Токен нужно отправить только один раз.*\n\nПока могу ответить на общие вопросы о финансах без актуальных котировок."
+                
+                await memory.save_conversation(
+                    question=question,
+                    answer=answer,
+                    intent=intent.value,
+                    session_id=session_id
+                )
+                
+                return {
+                    "intent": intent.value,
+                    "success": False,
+                    "answer": answer
+                }
+            
+            logger.info("  ✓ Токен найден, запрашиваем данные")
+
+            securities_context = await get_multiple_instruments_info(token, securities_info.get("tickers", []))
+            securities_context = format_multiple_instruments_for_llm(securities_context)
+            
+            portfolio_info = ""
             if token:
                 try:
                     accounts = await get_accounts(token)
@@ -620,9 +725,9 @@ async def process_question(question, user=None, account_id=None, session_id=None
                 except Exception as e:
                     logger.warning(f"⚠️ Не удалось получить портфель: {e}")
             
-            # Генерируем ответ с учётом портфеля
-            full_context = news_context + portfolio_info
-            prompt = build_securities_answer_prompt(question, full_context)
+            user_info = await memory.get_profile_summary()
+
+            prompt = build_securities_answer_prompt(question, securities_context, portfolio_info, user_info)
             answer = await call_llm(client, prompt)
             
             if not answer:
@@ -650,28 +755,29 @@ async def process_question(question, user=None, account_id=None, session_id=None
         
         
         # ====================================================================
-        # СЦЕНАРИЙ 3️⃣: ОБЩИЙ ВОПРОС НЕ ПРО ЦЕННЫЕ БУМАГИ (GENERAL)
+        # СЦЕНАРИЙ 3: ОБЩИЙ ВОПРОС НЕ ПРО ЦЕННЫЕ БУМАГИ (GENERAL)
         # ====================================================================
         else:
             logger.info("=" * 80)
             logger.info("3️⃣ СЦЕНАРИЙ: ОБЩИЙ ФИНАНСОВЫЙ ВОПРОС (RAG)")
             logger.info("=" * 80)
             
-            # Получаем контекст из RAG
             logger.info("🔍 Получение контекста из RAG...")
             try:
-                rag_context = await get_rag_context(question, top_k=3)
-                logger.info(f"  ✓ RAG контекст: {len(rag_context)} символов")
+                if settings.RAG_CONFIG.get("use_rag"):
+                    rag_context = await get_rag_context(question, top_k=3)
+                    logger.info(f"  ✓ RAG контекст: {len(rag_context)} символов")
+                else:
+                    rag_context = ""
+                    logger.info("  ✓ RAG система отключена в настройках")
             except Exception as e:
                 logger.error(f"  ❌ Ошибка получения контекста из RAG: {e}")
                 rag_context = ""
             
-            # Добавляем контекст из истории
             if conversation_context:
                 logger.info("  ✓ Добавление контекста из истории диалогов")
                 rag_context = f"{conversation_context}\n\n---\n\n{rag_context}"
             
-            # Генерируем ответ
             prompt = build_general_answer_prompt(question, rag_context)
             answer = await call_llm(client, prompt)
             
@@ -686,9 +792,8 @@ async def process_question(question, user=None, account_id=None, session_id=None
                 session_id=session_id
             )
             
-            # Периодический анализ профиля каждые 10 диалогов
-            history = await memory.get_conversation_history(limit=1)
-            if len(history) % 10 == 0:
+            history = await memory.get_conversation_count()
+            if history % 10 == 0:
                 logger.info("📊 Запуск автоматического анализа профиля (каждые 10 диалогов)...")
                 from .services.memorybank import analyze_and_update_profile
                 risk_analysis = await analyze_and_update_profile(memory, client)
