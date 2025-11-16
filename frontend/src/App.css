@@ -11,12 +11,9 @@ body, html, #root {
 }
 
 .app {
-  height: 100vh;
-  background: #0f0f1a;
-  color: #e0e0e0;
-  font-family: 'Segoe UI', sans-serif;
-  display: flex;
-  flex-direction: column;
+  background: radial-gradient(circle at top, #202041 0, #050510 45%, #020208 100%);
+  color: #e5e7eb;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 /*  КОНТЕЙНЕР С ОГРАНИЧЕНИЕМ  */
@@ -187,10 +184,8 @@ body, html, #root {
 }
 
 .message-bubble {
-  display: flex;
-  gap: 0.75rem;
-  max-width: 85%;
-  align-self: flex-start;
+  gap: 0.6rem;
+  margin-bottom: 0.25rem;
 }
 
 .message-bubble.user {
@@ -213,19 +208,24 @@ body, html, #root {
 }
 
 .bubble-content {
-  background: #1a1a2e;
-  padding: 1rem;
-  border-radius: 16px;
+  background: linear-gradient(135deg, #1a1a2e, #111122);
+  padding: 0.9rem 1rem;
+  border-radius: 18px;
   border-bottom-left-radius: 4px;
-  line-height: 1.6;
   font-size: 0.95rem;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.02);
 }
 
 .message-bubble.user .bubble-content {
-  background: #2a2a3e;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.message-bubble.user .bubble-content {
+  background: linear-gradient(135deg, #2a2a3e, #3a3055);
   border-bottom-right-radius: 4px;
-  border-bottom-left-radius: 16px;
-  color: #fff;
+  border-bottom-left-radius: 18px;
 }
 
 /*  GRAPH BUTTON  */
@@ -289,14 +289,16 @@ body, html, #root {
   bottom: 0;
   left: 0;
   right: 0;
-  padding: 0.75rem 0;
+  padding: 1rem 2rem;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border-top: 1px solid #222230;
   display: flex;
-  justify-content: center;
-  align-items: flex-end;
+  gap: 0.75rem;
+  align-items: center;      /* 👈 выравниваем по центру по вертикали */
   z-index: 1000;
-  background: rgba(15, 15, 26, 0.98);
-  backdrop-filter: blur(10px);
+  max-width: 1200px;
+  margin: 0 auto;
 }
 
 .input-inner {
@@ -317,10 +319,16 @@ body, html, #root {
   padding: 0.75rem 1rem;
   font-size: 0.95rem;
   resize: none;
-  min-height: 48px;
-  max-height: 120px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  min-height: 44px;
+  max-height: 96px;
   overflow-y: auto;
   line-height: 1.5;
+}
+
+.input-container textarea::-webkit-scrollbar {
+  display: none;
 }
 
 .input-container textarea::placeholder {
@@ -366,9 +374,10 @@ body, html, #root {
 
 /*  MARKDOWN  */
 .message-bubble.assistant .bubble-content {
-  max-width: 650px;       /* ограничение ширины пузыря */
-  overflow-x: auto;       /* включаем горизонтальный скролл */
-  scrollbar-width: thin;  /* нормальный скролл */
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: #e5e7eb;
+  max-width: 650px;
 }
 
 /* Заголовки */
@@ -407,15 +416,15 @@ body, html, #root {
 .md-blockquote {
   margin: 0.5rem 0;
   padding: 0.5rem 0.75rem;
-  border-left: 3px solid rgba(255, 255, 255, 0.25);
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 0.25rem;
+  border-left: 3px solid #fbbf24;
+  background: rgba(250, 204, 21, 0.04);
+  border-radius: 0.4rem;
   font-style: italic;
 }
 
 /* Ссылки */
 .md-link {
-  color: #ffcc00;
+  color: #facc15;
   text-decoration: underline;
   text-decoration-thickness: 1px;
 }
@@ -423,18 +432,28 @@ body, html, #root {
   text-decoration-style: dashed;
 }
 
+.message-bubble.assistant code:not(pre code) {
+  background: #222;
+  padding: 0.15rem 0.35rem;
+  border-radius: 4px;
+  font-family: 'Fira Code', monospace;
+  font-size: 0.85rem;
+}
+
 /* Таблицы */
 .md-table {
-  display: block;          /* превращаем в блочный элемент */
-  overflow-x: auto;        /* горизонтальная прокрутка */
-  max-width: 100%;         /* никогда не вылезает наружу */
-  white-space: nowrap;     /* не переносить таблицу */
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
   border-collapse: collapse;
   margin: 0.5rem 0;
+  font-size: 0.9rem;
 }
-.md-th, .md-td {
-  padding: 0.5rem;
+.md-th,
+.md-td {
   border: 1px solid #333;
+  padding: 0.5rem;
+  text-align: left;
 }
 .md-th {
   background: #222;
@@ -469,20 +488,16 @@ body, html, #root {
 /*  SEND BUTTON  */
 
 .send-button {
-  position: relative;
-  width: 44px;
-  height: 44px;
-  background: #ffcc00;
-  color: #000;
-  border: none;
-  border-radius: 50%;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.6rem 0.6rem;
-  overflow: hidden;
+  flex-shrink: 0;
+  align-self: center;
+  box-shadow: 0 8px 18px rgba(250, 204, 21, 0.4);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
+.send-button:hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.03);
+  box-shadow: 0 10px 22px rgba(250, 204, 21, 0.55);
+}
+
 
 .send-button:disabled {
   opacity: 0.5;
@@ -493,4 +508,10 @@ body, html, #root {
   width: 30px;
   height: 30px;
   object-fit: contain;
+}
+
+.logo-icon,
+.avatar {
+  background: #facc15;
+  box-shadow: 0 4px 10px rgba(250, 204, 21, 0.4);
 }
