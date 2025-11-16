@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timedelta
 from tinkoff.invest import (
     AsyncClient, 
-    MoneyValue, 
+    CandleInterval,
     Quotation, 
     InstrumentIdType,
     PortfolioResponse,
@@ -11,6 +11,7 @@ from tinkoff.invest import (
     OrderDirection,
     OrderType
 )
+import asyncio
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -953,3 +954,324 @@ async def get_portfolio_summary(token, account_id):
         logger.error(f"Сообщение: {str(e)}", exc_info=True)
         logger.error("=" * 80)
         raise
+
+# ============================================================================
+# ПОЛУЧЕНИЕ ПОДРОБНОЙ ИНФОРМАЦИИ О ЦЕННОЙ БУМАГЕ
+# ============================================================================
+
+async def get_detailed_instrument_info(token, ticker_or_figi, use_figi=False):
+    """
+    Получение подробной информации об инструменте
+    
+    Args:
+        token: API токен Tinkoff
+        ticker_or_figi: Тикер или FIGI инструмента
+        use_figi: Если True, ищем по FIGI, иначе по тикеру
+        
+    Returns:
+        dict: Подробная информация об инструменте
+    """
+    logger.info("=" * 80)
+    logger.info("📊 ПОЛУЧЕНИЕ ИНФОРМАЦИИ ОБ ИНСТРУМЕНТЕ")
+    logger.info("=" * 80)
+    logger.info(f"  ├─ Идентификатор: {ticker_or_figi}")
+    logger.info(f"  └─ Поиск по: {'FIGI' if use_figi else 'Тикер'}")
+    
+    try:
+        async with AsyncClient(token) as client:
+            # Если ищем по FIGI
+            if use_figi:
+                figi = ticker_or_figi
+            else:
+                # Сначала находим инструмент по тикеру
+                instrument = await get_instrument_by_ticker(token, ticker_or_figi)
+                if not instrument:
+                    logger.error(f"  ❌ Инструмент {ticker_or_figi} не найден")
+                    return None
+                figi = instrument['figi']
+            
+            logger.info(f"  ⏳ Получение данных по FIGI: {figi}")
+            
+            # Получаем полную информацию об инструменте
+            instrument_response = await client.instruments.get_instrument_by(
+                id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_FIGI,
+                id=figi
+            )
+            instr = instrument_response.instrument
+            
+            # Получаем текущую цену (последняя сделка)
+            last_prices_response = await client.market_data.get_last_prices(figi=[figi])
+            last_price = None
+            if last_prices_response.last_prices:
+                last_price = quotation_to_float(last_prices_response.last_prices[0].price)
+            
+            # Получаем стакан заявок (лучшие цены покупки/продажи)
+            try:
+                orderbook = await client.market_data.get_order_book(
+                    figi=figi,
+                    depth=10
+                )
+                best_bid = quotation_to_float(orderbook.bids[0].price) if orderbook.bids else None
+                best_ask = quotation_to_float(orderbook.asks[0].price) if orderbook.asks else None
+            except Exception as e:
+                logger.warning(f"  ⚠️ Не удалось получить стакан: {e}")
+                best_bid = None
+                best_ask = None
+            
+            # Получаем свечи (исторические данные за последние 30 дней)
+            try:
+                from datetime import datetime, timedelta
+                now = datetime.utcnow()
+                from_date = now - timedelta(days=30)
+                
+                candles_response = await client.market_data.get_candles(
+                    figi=figi,
+                    from_=from_date,
+                    to=now,
+                    interval=CandleInterval.CANDLE_INTERVAL_DAY
+                )
+                
+                candles_data = []
+                for candle in candles_response.candles[-30:]:  # Последние 30 дней
+                    candles_data.append({
+                        'time': candle.time.isoformat(),
+                        'open': quotation_to_float(candle.open),
+                        'high': quotation_to_float(candle.high),
+                        'low': quotation_to_float(candle.low),
+                        'close': quotation_to_float(candle.close),
+                        'volume': candle.volume,
+                    })
+                
+                # Расчёт изменения за период
+                if len(candles_data) >= 2:
+                    first_price = candles_data[0]['close']
+                    current_price = candles_data[-1]['close']
+                    price_change = current_price - first_price
+                    price_change_percent = (price_change / first_price) * 100 if first_price else 0
+                else:
+                    price_change = None
+                    price_change_percent = None
+                
+            except Exception as e:
+                logger.warning(f"  ⚠️ Не удалось получить свечи: {e}")
+                candles_data = []
+                price_change = None
+                price_change_percent = None
+            
+            # Формируем результат
+            result = {
+                # Основная информация
+                'name': instr.name,
+                'ticker': instr.ticker,
+                'figi': instr.figi,
+                'uid': instr.uid,
+                'isin': instr.isin,
+                'class_code': instr.class_code,
+                'instrument_type': str(instr.instrument_type),
+                
+                # Торговая информация
+                'currency': instr.currency,
+                'lot': instr.lot,
+                'min_price_increment': quotation_to_float(instr.min_price_increment),
+                'trading_status': str(instr.trading_status),
+                
+                # Флаги доступности
+                'api_trade_available_flag': getattr(instr, 'api_trade_available_flag', True),
+                'buy_available_flag': getattr(instr, 'buy_available_flag', True),
+                'sell_available_flag': getattr(instr, 'sell_available_flag', True),
+                'for_qual_investor_flag': getattr(instr, 'for_qual_investor_flag', False),
+                'for_iis_flag': getattr(instr, 'for_iis_flag', True),
+                
+                # Рыночные данные
+                'last_price': last_price,
+                'best_bid': best_bid,
+                'best_ask': best_ask,
+                'spread': (best_ask - best_bid) if (best_ask and best_bid) else None,
+                
+                # Исторические данные
+                'price_change_30d': price_change,
+                'price_change_percent_30d': price_change_percent,
+                'candles_30d': candles_data,
+                
+                # Дополнительная информация
+                'sector': getattr(instr, 'sector', None),
+                'country_of_risk': getattr(instr, 'country_of_risk', None),
+                'country_of_risk_name': getattr(instr, 'country_of_risk_name', None),
+                
+                # Для акций
+                'share_type': str(getattr(instr, 'share_type', None)) if hasattr(instr, 'share_type') else None,
+                'ipo_date': getattr(instr, 'ipo_date', None),
+                
+                # Для облигаций
+                'maturity_date': getattr(instr, 'maturity_date', None),
+                'coupon_quantity_per_year': getattr(instr, 'coupon_quantity_per_year', None),
+                'nominal': money_value_to_float(getattr(instr, 'nominal', None)) if hasattr(instr, 'nominal') else None,
+            }
+            
+            logger.info("=" * 80)
+            logger.info("✅ ИНФОРМАЦИЯ ОБ ИНСТРУМЕНТЕ ПОЛУЧЕНА")
+            logger.info("=" * 80)
+            logger.info(f"  ├─ Название: {result['name']}")
+            logger.info(f"  ├─ Тикер: {result['ticker']}")
+            logger.info(f"  ├─ Текущая цена: {result['last_price']} {result['currency']}")
+            if result['price_change_percent_30d'] is not None:
+                logger.info(f"  ├─ Изменение (30д): {result['price_change_percent_30d']:.2f}%")
+            logger.info(f"  └─ Статус торговли: {result['trading_status']}")
+            logger.info("=" * 80)
+            
+            return result
+            
+    except Exception as e:
+        logger.error("=" * 80)
+        logger.error("❌ ОШИБКА ПОЛУЧЕНИЯ ИНФОРМАЦИИ ОБ ИНСТРУМЕНТЕ")
+        logger.error("=" * 80)
+        logger.error(f"Идентификатор: {ticker_or_figi}")
+        logger.error(f"Тип ошибки: {type(e).__name__}")
+        logger.error(f"Сообщение: {str(e)}", exc_info=True)
+        logger.error("=" * 80)
+        return None
+
+
+async def get_multiple_instruments_info(token, tickers):
+    """
+    Получение информации о нескольких инструментах параллельно
+    
+    Args:
+        token: API токен Tinkoff
+        tickers: Список тикеров
+        
+    Returns:
+        dict: Словарь {ticker: info}
+    """
+    logger.info("=" * 80)
+    logger.info("📊 ПОЛУЧЕНИЕ ИНФОРМАЦИИ О НЕСКОЛЬКИХ ИНСТРУМЕНТАХ")
+    logger.info("=" * 80)
+    logger.info(f"  └─ Тикеры: {', '.join(tickers)}")
+    
+    tasks = [get_detailed_instrument_info(token, ticker) for ticker in tickers]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    instruments_data = {}
+    for ticker, result in zip(tickers, results):
+        if isinstance(result, Exception):
+            logger.error(f"  ❌ {ticker}: {result}")
+            instruments_data[ticker] = None
+        else:
+            instruments_data[ticker] = result
+    
+    successful = sum(1 for v in instruments_data.values() if v is not None)
+    logger.info("=" * 80)
+    logger.info(f"✅ ПОЛУЧЕНО ДАННЫХ: {successful}/{len(tickers)}")
+    logger.info("=" * 80)
+    
+    return instruments_data
+
+
+def format_instrument_info_for_llm(instrument_data):
+    """
+    Форматирование информации об инструменте для передачи в LLM
+    
+    Args:
+        instrument_data: Данные об инструменте
+        
+    Returns:
+        str: Отформатированная строка
+    """
+    if not instrument_data:
+        return "Информация об инструменте недоступна."
+    
+    # Статус торговли на русском
+    trading_status_map = {
+        'SECURITY_TRADING_STATUS_NORMAL_TRADING': '✅ Торгуется',
+        'SECURITY_TRADING_STATUS_NOT_AVAILABLE_FOR_TRADING': '❌ Недоступен',
+        'SECURITY_TRADING_STATUS_CLOSING_AUCTION': '🔄 Закрывающий аукцион',
+        'SECURITY_TRADING_STATUS_OPENING_AUCTION': '🔄 Открывающий аукцион',
+        'SECURITY_TRADING_STATUS_BREAK_IN_TRADING': '⏸️ Перерыв в торгах',
+    }
+    
+    trading_status = trading_status_map.get(
+        instrument_data.get('trading_status', ''),
+        instrument_data.get('trading_status', 'Неизвестно')
+    )
+    
+    formatted = f"""📊 **{instrument_data.get('name')} ({instrument_data.get('ticker')})**
+
+#### Основная информация
+- **Тип инструмента:** {instrument_data.get('instrument_type', 'N/A')}
+- **FIGI:** `{instrument_data.get('figi')}`
+- **ISIN:** `{instrument_data.get('isin')}`
+- **Валюта:** {instrument_data.get('currency')}
+- **Лот:** {instrument_data.get('lot')} шт.
+
+#### Рыночные данные
+"""
+    
+    if instrument_data.get('last_price'):
+        formatted += f"- **Текущая цена:** {instrument_data['last_price']:.2f} {instrument_data.get('currency')}\n"
+    
+    if instrument_data.get('best_bid') and instrument_data.get('best_ask'):
+        formatted += f"- **Лучшая цена покупки (bid):** {instrument_data['best_bid']:.2f}\n"
+        formatted += f"- **Лучшая цена продажи (ask):** {instrument_data['best_ask']:.2f}\n"
+        formatted += f"- **Спред:** {instrument_data.get('spread', 0):.2f}\n"
+    
+    if instrument_data.get('price_change_percent_30d') is not None:
+        change = instrument_data['price_change_percent_30d']
+        emoji = "📈" if change > 0 else "📉" if change < 0 else "➡️"
+        formatted += f"- **Изменение за 30 дней:** {emoji} {change:+.2f}%\n"
+    
+    formatted += f"\n#### Статус торговли\n- {trading_status}\n"
+    
+    # Доступность для торговли
+    if instrument_data.get('api_trade_available_flag'):
+        formatted += "- ✅ Доступен для торговли через API\n"
+    else:
+        formatted += "- ❌ Недоступен для торговли через API\n"
+    
+    if instrument_data.get('for_qual_investor_flag'):
+        formatted += "- ⚠️ Только для квалифицированных инвесторов\n"
+    
+    # Дополнительная информация для акций
+    if instrument_data.get('sector'):
+        formatted += f"\n#### Дополнительно\n- **Сектор:** {instrument_data['sector']}\n"
+    
+    if instrument_data.get('country_of_risk_name'):
+        formatted += f"- **Страна риска:** {instrument_data['country_of_risk_name']}\n"
+    
+    if instrument_data.get('ipo_date'):
+        formatted += f"- **Дата IPO:** {instrument_data['ipo_date']}\n"
+    
+    # Для облигаций
+    if instrument_data.get('maturity_date'):
+        formatted += f"\n#### Параметры облигации\n"
+        formatted += f"- **Дата погашения:** {instrument_data['maturity_date']}\n"
+        if instrument_data.get('coupon_quantity_per_year'):
+            formatted += f"- **Купонов в год:** {instrument_data['coupon_quantity_per_year']}\n"
+        if instrument_data.get('nominal'):
+            formatted += f"- **Номинал:** {instrument_data['nominal']}\n"
+    
+    return formatted
+
+
+def format_multiple_instruments_for_llm(instruments_data):
+    """
+    Форматирование информации о нескольких инструментах для LLM
+    
+    Args:
+        instruments_data: Dict {ticker: instrument_data}
+        
+    Returns:
+        str: Отформатированная строка
+    """
+    if not instruments_data:
+        return "Информация об инструментах недоступна."
+    
+    formatted = "📊 **ИНФОРМАЦИЯ О ЦЕННЫХ БУМАГАХ**\n\n"
+    
+    for ticker, data in instruments_data.items():
+        if data:
+            formatted += format_instrument_info_for_llm(data)
+            formatted += "\n---\n\n"
+        else:
+            formatted += f"❌ **{ticker}:** Информация недоступна\n\n"
+    
+    return formatted

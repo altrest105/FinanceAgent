@@ -23,7 +23,6 @@ load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
@@ -139,6 +138,11 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
+# HF
+new_cache_dir = BASE_DIR / 'files' / 'hf_cache'
+new_cache_dir.mkdir(parents=True, exist_ok=True) 
+os.environ['HF_HOME'] = str(new_cache_dir)
+os.environ['TRANSFORMERS_CACHE'] = str(new_cache_dir / "models")
 
 # Encryption
 ENCRYPTION_KEY = os.getenv('ENCRYPTION_KEY', 'zaizwddTH69_9txJ8i5XHj9rEZHWFnWLH27LNjYUfkk=')

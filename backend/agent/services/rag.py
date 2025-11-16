@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 # Конфигурация
 TOP_K = 3
-TOP_K_BEFORE_RERANK = 40
+TOP_K_BEFORE_RERANK = 20
 BATCH_SIZE = 100
 
 # Глобальные переменные

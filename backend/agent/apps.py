@@ -23,17 +23,17 @@ class AgentConfig(AppConfig):
         # Пропускаем инициализацию при миграциях и других командах
         skip_commands = ['migrate', 'makemigrations', 'createsuperuser', 'collectstatic', 'shell']
         if any(cmd in sys.argv for cmd in skip_commands):
-            logger.info("⏭️ Пропуск инициализации RAG (команда управления)")
+            logger.info("⏭️ Пропуск инициализации ИИ-Агента (команда управления)")
             return
         
         # Инициализируем только при запуске сервера
         if 'runserver' in sys.argv or 'gunicorn' in sys.argv[0]:
             logger.info("=" * 80)
-            logger.info("🚀 АВТОМАТИЧЕСКАЯ ИНИЦИАЛИЗАЦИЯ RAG СИСТЕМЫ")
+            logger.info("🚀 АВТОМАТИЧЕСКАЯ ИНИЦИАЛИЗАЦИЯ ИИ-АГЕНТА")
             logger.info("=" * 80)
             
             try:
-                # Инициализация RAG системы
+                # Инициализация ИИ-Агента системы
                 from .services.rag import initialize_rag
                 
                 # Запускаем асинхронную инициализацию
@@ -43,22 +43,22 @@ class AgentConfig(AppConfig):
                 loop.close()
                 
                 logger.info("=" * 80)
-                logger.info("✅ RAG СИСТЕМА ГОТОВА К РАБОТЕ")
+                logger.info("✅ ИИ-АГЕНТ ГОТОВ К РАБОТЕ")
                 logger.info("=" * 80)
                 
             except Exception as e:
                 logger.error("=" * 80)
-                logger.error("❌ КРИТИЧЕСКАЯ ОШИБКА ИНИЦИАЛИЗАЦИИ RAG")
+                logger.error("❌ КРИТИЧЕСКАЯ ОШИБКА ИНИЦИАЛИЗАЦИИ ИИ-АГЕНТА")
                 logger.error("=" * 80)
                 logger.error(f"Тип: {type(e).__name__}")
                 logger.error(f"Сообщение: {str(e)}", exc_info=True)
                 logger.error("=" * 80)
                 
                 # Не падаем, чтобы Django мог стартовать
-                logger.warning("⚠️ Сервер запущен БЕЗ RAG системы!")
+                logger.warning("⚠️ Сервер запущен БЕЗ ИИ-Агента!")
     
     async def _init_rag_system(self):
-        """Асинхронная инициализация RAG системы"""
+        """Асинхронная инициализация ИИ-Агента"""
         from django.conf import settings
         from openai import AsyncOpenAI
         from .services.rag import (
@@ -121,7 +121,7 @@ class AgentConfig(AppConfig):
         
         # 4. Инициализация базы знаний и retriever
         try:
-            # Передаём загруженные модели в RAG систему
+            # Передаём загруженные модели в ИИ-Агента
             import agent.services.rag as rag_module
             rag_module._local_embedder = self.__class__.embedder_model
             rag_module._local_reranker = self.__class__.reranker_model
