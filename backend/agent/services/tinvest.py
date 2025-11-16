@@ -496,7 +496,8 @@ async def get_operations(
 
 async def search_instrument(token, query, instrument_type = None):
     """
-    Поиск инструмента по названию или тикеру
+    Поиск инструмента по названию или тикеру с фильтрацией по API-доступности 
+    и строгим совпадением тикера.
     
     Args:
         token: API токен Tinkoff
@@ -506,29 +507,35 @@ async def search_instrument(token, query, instrument_type = None):
     Returns:
         List[dict]: Список найденных инструментов
     """
+    normalized_query = query.strip().upper()
     logger.info("=" * 60)
     logger.info("🔍 ПОИСК ИНСТРУМЕНТА")
     logger.info("=" * 60)
-    logger.info(f"  ├─ Запрос: '{query}'")
-    logger.info(f"  └─ Тип фильтра: {instrument_type or 'все типы'}")
+    logger.info(f"  ├─ Запрос: '{normalized_query}'")
+    logger.info(f"  └─ Тип фильтра: {instrument_type or 'все типы'}")
     
     try:
         async with AsyncClient(token) as client:
-            logger.debug("  ⏳ Запрос к API Tinkoff...")
-            search_response = await client.instruments.find_instrument(query=query)
+            logger.debug("  ⏳ Запрос к API Tinkoff...")
+            # Используем оригинальный query для поиска, чтобы получить больше результатов
+            search_response = await client.instruments.find_instrument(query=query) 
             
             results = []
             
             for idx, instrument in enumerate(search_response.instruments, 1):
-                # Фильтрация по типу инструмента (если задано)
+                # 1. Фильтрация по типу инструмента (если задано)
                 if instrument_type and str(instrument.instrument_type) != instrument_type:
-                    logger.debug(f"  ⏭️ {idx}. {instrument.ticker}: пропущен (тип {instrument.instrument_type})")
+                    logger.debug(f"  ⏭️ {idx}. {instrument.ticker}: пропущен (тип {instrument.instrument_type})")
                     continue
                 
-                # InstrumentShort содержит только базовые поля
+                # 2. Строгое совпадение тикера (только если запрос похож на тикер)
+                if len(normalized_query) <= 6 and instrument.ticker.upper() != normalized_query:
+                    logger.debug(f"  ⏭️ {idx}. {instrument.ticker}: пропущен (тикер не совпадает)")
+                    continue
+                
                 # Получаем полную информацию об инструменте через FIGI
                 try:
-                    logger.debug(f"  ⏳ Получение полной информации для {instrument.ticker}...")
+                    logger.debug(f"  ⏳ Получение полной информации для {instrument.ticker}...")
                     
                     full_instrument_response = await client.instruments.get_instrument_by(
                         id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_FIGI,
@@ -536,45 +543,45 @@ async def search_instrument(token, query, instrument_type = None):
                     )
                     full_instrument = full_instrument_response.instrument
                     
+                    # 3. ФИЛЬТРАЦИЯ ПО API ДОСТУПНОСТИ
+                    is_api_available = getattr(full_instrument, 'api_trade_available_flag', False)
+                    if not is_api_available:
+                        logger.info(f"  ❌ {idx}. {full_instrument.ticker} - пропущен (недоступен через API)")
+                        continue
+                    
+                    # --- ИНСТРУМЕНТ ПРОШЕЛ ВСЕ ФИЛЬТРЫ ---
+                    
                     result = {
                         'name': full_instrument.name,
                         'ticker': full_instrument.ticker,
                         'figi': full_instrument.figi,
+                        'uid': full_instrument.uid,
                         'type': str(full_instrument.instrument_type),
                         'currency': full_instrument.currency,
                         'class_code': full_instrument.class_code,
                         'isin': full_instrument.isin,
                         'lot': full_instrument.lot,
                         'min_price_increment': quotation_to_float(full_instrument.min_price_increment) if hasattr(full_instrument, 'min_price_increment') else None,
-                        'trading_status': str(full_instrument.trading_status) if hasattr(full_instrument, 'trading_status') else 'unknown'
+                        'trading_status': str(full_instrument.trading_status) if hasattr(full_instrument, 'trading_status') else 'unknown',
+                        # Поля доступности
+                        'api_trade_available_flag': is_api_available,
+                        'buy_available_flag': getattr(full_instrument, 'buy_available_flag', True),
+                        'sell_available_flag': getattr(full_instrument, 'sell_available_flag', True),
+                        'for_qual_investor_flag': getattr(full_instrument, 'for_qual_investor_flag', False),
+                        'for_iis_flag': getattr(full_instrument, 'for_iis_flag', True),
                     }
                     
                     results.append(result)
-                    
-                    logger.info(f"  ✓ {len(results)}. {full_instrument.ticker} - {full_instrument.name} ({full_instrument.currency})")
+                    logger.info(f"  ✅ {len(results)}. {full_instrument.ticker} - {full_instrument.name} ({full_instrument.currency})")
                     
                 except Exception as e:
-                    logger.warning(f"  ⚠️ Не удалось получить полную информацию для {instrument.ticker}: {e}")
-                    
-                    # Используем базовую информацию из InstrumentShort
-                    result = {
-                        'name': instrument.name,
-                        'ticker': instrument.ticker,
-                        'figi': instrument.figi,
-                        'type': str(instrument.instrument_type),
-                        'currency': 'RUB',  # По умолчанию
-                        'class_code': instrument.class_code,
-                        'isin': getattr(instrument, 'isin', ''),
-                        'lot': 1,  # По умолчанию
-                        'min_price_increment': None,
-                        'trading_status': 'unknown'
-                    }
-                    
-                    results.append(result)
-                    logger.info(f"  ✓ {len(results)}. {instrument.ticker} - {instrument.name} (базовая информация)")
+                    logger.warning(f"  ⚠️ Не удалось получить полную информацию для {instrument.ticker}: {e}")
+                    # В случае ошибки получения полной информации, пропускаем его, так как не можем проверить доступность API
+                    continue 
             
             logger.info("=" * 60)
             logger.info(f"✅ НАЙДЕНО ИНСТРУМЕНТОВ: {len(results)}")
+            logger.info(f"  └─ Отобраны только те, где Ticker совпадает и API доступен.")
             logger.info("=" * 60)
             
             return results
@@ -588,6 +595,113 @@ async def search_instrument(token, query, instrument_type = None):
         logger.error(f"Сообщение: {str(e)}", exc_info=True)
         logger.error("=" * 60)
         raise
+
+
+# ============================================================================
+# ПРОВЕРКА ДОСТУПНОСТИ ИНСТРУМЕНТА ДЛЯ ТОРГОВЛИ
+# ============================================================================
+
+async def check_instrument_tradeable(token, instrument):
+    """
+    Проверка доступности инструмента для торговли
+    
+    Args:
+        token: API токен Tinkoff
+        instrument: Словарь с информацией об инструменте
+        
+    Returns:
+        bool: True если инструмент доступен для торговли
+    """
+    try:
+        # Проверяем статус торговли
+        trading_status = instrument.get('trading_status', '').lower()
+        
+        # Список статусов, при которых торговля доступна
+        tradeable_statuses = [
+            'normal_trading',
+            'security_trading_status_normal_trading',
+            'trading_status_normal_trading'
+        ]
+        
+        # Проверяем наличие флагов доступности
+        api_trade_available = instrument.get('api_trade_available_flag', True)
+        buy_available = instrument.get('buy_available_flag', True)
+        sell_available = instrument.get('sell_available_flag', True)
+        
+        is_tradeable = (
+            any(status in trading_status for status in tradeable_statuses) and
+            api_trade_available and
+            (buy_available or sell_available)
+        )
+        
+        logger.debug(f"  🔍 Проверка доступности {instrument.get('ticker')}:")
+        logger.debug(f"    ├─ Trading status: {trading_status}")
+        logger.debug(f"    ├─ API trade: {api_trade_available}")
+        logger.debug(f"    ├─ Buy available: {buy_available}")
+        logger.debug(f"    ├─ Sell available: {sell_available}")
+        logger.debug(f"    └─ Tradeable: {is_tradeable}")
+        
+        return is_tradeable
+        
+    except Exception as e:
+        logger.warning(f"  ⚠️ Ошибка проверки доступности: {e}")
+        return False
+
+
+# ============================================================================
+# ПОЛУЧЕНИЕ ИНСТРУМЕНТА ПО ТИКЕРУ С ПРОВЕРКОЙ ДОСТУПНОСТИ
+# ============================================================================
+
+async def get_instrument_by_ticker(token, ticker):
+    """
+    Быстрый поиск ДОСТУПНОГО ДЛЯ ТОРГОВЛИ инструмента по тикеру
+    
+    Args:
+        token: API токен Tinkoff
+        ticker: Тикер инструмента (например, 'SBER')
+        
+    Returns:
+        dict: Информация об инструменте или None
+    """
+    logger.info(f"🔍 Поиск доступного для торговли инструмента: {ticker}")
+    
+    try:
+        # Получаем все инструменты по тикеру
+        instruments = await search_instrument(token, ticker)
+        
+        if not instruments:
+            logger.warning(f"  ⚠️ Инструмент '{ticker}' не найден")
+            return None
+        
+        logger.info(f"  ✓ Найдено инструментов: {len(instruments)}")
+        
+        # Ищем точное совпадение по тикеру среди доступных
+        tradeable_instruments = []
+        
+        for instrument in instruments:
+            if instrument['ticker'].upper() == ticker.upper():
+                logger.debug(f"  🔍 Проверка: {instrument['ticker']} ({instrument.get('name')})")
+                
+                # Проверяем доступность для торговли
+                if await check_instrument_tradeable(token, instrument):
+                    tradeable_instruments.append(instrument)
+                    logger.info(f"  ✅ Доступен для торговли: {instrument['ticker']}")
+                else:
+                    logger.warning(f"  ⚠️ НЕ доступен для торговли: {instrument['ticker']}")
+        
+        # Возвращаем первый доступный инструмент
+        if tradeable_instruments:
+            selected = tradeable_instruments[0]
+            logger.info(f"  ✅ Выбран инструмент: {selected['ticker']} - {selected.get('name')}")
+            return selected
+        
+        # Если точных совпадений нет, возвращаем первый результат
+        logger.warning(f"  ⚠️ Точное совпадение не найдено, используется первый результат")
+        return instruments[0]
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка поиска инструмента по тикеру '{ticker}': {e}")
+        return None
 
 
 # ============================================================================
@@ -664,46 +778,6 @@ async def search_shares(token, query):
 
 
 # ============================================================================
-# ПОЛУЧЕНИЕ ИНСТРУМЕНТА ПО ТИКЕРУ (БЫСТРЫЙ ПОИСК)
-# ============================================================================
-
-async def get_instrument_by_ticker(token, ticker):
-    """
-    Быстрый поиск инструмента по тикеру
-    
-    Args:
-        token: API токен Tinkoff
-        ticker: Тикер инструмента (например, 'SBER')
-        
-    Returns:
-        dict: Информация об инструменте или None
-    """
-    logger.info(f"🔍 Быстрый поиск инструмента по тикеру: {ticker}")
-    
-    try:
-        # Сначала пробуем найти через поиск
-        instruments = await search_instrument(token, ticker)
-        
-        if not instruments:
-            logger.warning(f"  ⚠️ Инструмент '{ticker}' не найден")
-            return None
-        
-        # Ищем точное совпадение по тикеру
-        for instrument in instruments:
-            if instrument['ticker'].upper() == ticker.upper():
-                logger.info(f"  ✅ Найдено точное совпадение: {instrument['ticker']}")
-                return instrument
-        
-        # Если точного совпадения нет, возвращаем первый результат
-        logger.warning(f"  ⚠️ Точное совпадение не найдено, используется первый результат")
-        return instruments[0]
-        
-    except Exception as e:
-        logger.error(f"❌ Ошибка поиска инструмента по тикеру '{ticker}': {e}")
-        return None
-
-
-# ============================================================================
 # РАЗМЕЩЕНИЕ ЗАЯВКИ
 # ============================================================================
 
@@ -713,7 +787,7 @@ async def place_order(
     figi,
     quantity,
     direction, # 'buy' или 'sell'
-    order_type = 'market', # 'market' или 'limit'
+    order_type, # 'market' или 'limit'
     price = None
 ):
     """
@@ -751,7 +825,7 @@ async def place_order(
                 logger.debug("  ⏳ Размещение рыночной заявки...")
                 
                 response = await client.orders.post_order(
-                    figi=figi,
+                    instrument_id=figi,
                     quantity=quantity,
                     direction=order_direction,
                     account_id=account_id,
@@ -767,12 +841,12 @@ async def place_order(
                 logger.debug(f"  ⏳ Размещение лимитной заявки с ценой {price}...")
                 
                 response = await client.orders.post_order(
-                    figi=figi,
+                    instrument_id=figi,
                     quantity=quantity,
                     price=price_quotation,
                     direction=order_direction,
                     account_id=account_id,
-                    order_type=OrderType.ORDER_TYPE_LIMIT
+                    order_type=OrderType.ORDER_TYPE_LIMIT,
                 )
             
             result = {
