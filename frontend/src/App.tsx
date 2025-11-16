@@ -125,19 +125,21 @@ function App() {
 
         {/* HEADER */}
         <header className="header">
-          <div className="logo">
-            <div className="logo-icon">
-              <img src="src/assets/icons/broke-icon.png" alt="" className="robot-icon" />
+          <div className="header-inner">
+            <div className="logo">
+              <div className="logo-icon">
+                <img src="src/assets/icons/broke-icon.png" alt="" className="robot-icon" />
+              </div>
+              <div>
+                <span>Finance Advisor</span>
+                <small>AI-консультант по инвестициям</small>
+              </div>
             </div>
-            <div>
-              <span>Finance Advisor</span>
-              <small>AI-консультант по инвестициям</small>
-            </div>
-          </div>
-          <div className="user">
-            <span>Пользователь</span>
-            <div className="avatar">
-              <img src="src/assets/icons/user-icon.png" alt="" className="user-icon" />
+            <div className="user">
+              <span>Пользователь</span>
+              <div className="avatar">
+                <img src="src/assets/icons/user-icon.png" alt="" className="user-icon" />
+              </div>
             </div>
           </div>
         </header>
@@ -203,23 +205,25 @@ function App() {
 
         {/* ПОЛЕ ВВОДА */}
         <div className="input-container">
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                sendMessage()
-              }
-            }}
-            placeholder="Как вам помочь?"
-            rows={1}
-            disabled={loading}
-          />
-          <button onClick={sendMessage} disabled={loading} className="send-button">
-            <img src="src/assets/icons/send-icon.png" alt="" className="send-icon" />
-          </button>
+          <div className="input-inner">
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  sendMessage()
+                }
+              }}
+              placeholder="Как вам помочь?"
+              rows={1}
+              disabled={loading}
+            />
+            <button onClick={sendMessage} disabled={loading} className="send-button">
+              <img src="src/assets/icons/send-icon.png" alt="" className="send-icon" />
+            </button>
+          </div>
         </div>
 
         {/* FOOTER */}

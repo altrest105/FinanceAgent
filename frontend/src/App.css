@@ -64,20 +64,28 @@ body, html, #root {
 
 /*  HEADER  */
 .header {
-position: fixed;
+  position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  padding: 1rem 2rem;
-  /* background: #141421; */
+  padding: 0.75rem 0;
   border-bottom: 1px solid #222230;
   display: flex;
-  justify-content: space-between;
+  justify-content: center;
   align-items: center;
   color: #fff;
   z-index: 1000;
+  background: rgba(15, 15, 26, 0.98);
+  backdrop-filter: blur(10px);
+}
+
+.header-inner {
+  width: 100%;
   max-width: 1200px;
-  margin: 0 auto;
+  padding: 0 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .logo {
@@ -146,13 +154,12 @@ position: fixed;
 
 /*  MESSAGES  */
 .messages-container {
-  transform: scale(0.8);
   flex: 1;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  padding-bottom: 0px;
-  padding-top: 20px;
+  padding-bottom: 0;
+  padding-top: 80px;
 }
 
 .messages {
@@ -282,17 +289,23 @@ position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  padding: 1rem 2rem;
-  /* background: rgba(20, 20, 33, 0.95); */
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  padding: 0.75rem 0;
   border-top: 1px solid #222230;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  z-index: 1000;
+  background: rgba(15, 15, 26, 0.98);
+  backdrop-filter: blur(10px);
+}
+
+.input-inner {
+  width: 100%;
+  max-width: 1200px;
+  padding: 0 2rem;
   display: flex;
   gap: 0.75rem;
   align-items: flex-end;
-  z-index: 1000;
-  max-width: 1200px;
-  margin: 0 auto;
 }
 
 .input-container textarea {
