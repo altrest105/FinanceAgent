@@ -1,0 +1,16 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body, html, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #0f0f1a;
+}
+
+#root {
+  height: 100vh;
+}
