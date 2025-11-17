@@ -2,7 +2,7 @@
 
 > AI-агент по инвестициям с интеграцией Tinkoff Invest API, RAG-системой и персонализацией профиля инвестора
 
-![Python](https://img.shields.io/badge/Python-3.12-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.11-blue.svg)
 ![Django](https://img.shields.io/badge/Django-5.2-green.svg)
 ![React](https://img.shields.io/badge/React-18-61DAFB.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)
@@ -35,6 +35,44 @@
 
 ## 🏗️ Архитектура
 
+### Структура проекта
+```
+FinanceAgent/
+├── backend/
+│   ├── agent/                     # Основное приложение
+│   │   ├── models.py              # БД модели (профиль, история диалогов)
+│   │   ├── views.py               # API endpoints
+│   │   ├── orchestrator.py        # Главный оркестратор запросов
+│   │   ├── services/
+│   │   │   ├── memorybank.py      # Управление профилем и историей
+│   │   │   ├── rag.py             # RAG-система (эмбеддинги, поиск)
+│   │   │   └── tinvest.py         # Tinkoff Invest API
+│   │   └── management/
+│   │       └── commands/
+│   │           └── init_demo_user.py  # Создание демо-пользователя
+│   ├── files/
+│   │   ├── train_data.csv         # Исходная база знаний
+│   │   └── hf_cache/              # Кэш HuggingFace моделей
+│   ├── backend/
+│   │   └── settings.py            # Конфигурация Django
+│   ├── requirements.txt           # Python зависимости
+│   └── Dockerfile                 # Docker образ для backend
+│
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx               # Главный компонент чата
+│   │   ├── App.css               # Стили
+│   │   └── assets/               # Иконки и изображения
+│   ├── vite.config.ts            # Конфигурация Vite
+│   ├── package.json              # Node.js зависимости
+│   └── Dockerfile                # Docker образ для frontend
+│
+├── docker-compose.yml            # Оркестрация контейнеров
+├── .env                          # Переменные окружения
+├── readme.md                     # Документация
+└── requirements.txt              # Зависимости python
+```
+
 ### Backend (Django)
 ```
 backend/
@@ -52,8 +90,9 @@ backend/
 ├── files/
 │   ├── train_data.csv         # Исходная база знаний
 │   └── hf_cache/              # Кэш HuggingFace моделей
-└── backend/
-    └── settings.py            # Конфигурация Django
+├── backend/
+│   └── settings.py            # Конфигурация Django
+└── Dockerfile                 # Docker образ
 ```
 
 ### Frontend (React + TypeScript)
@@ -63,48 +102,59 @@ frontend/
 │   ├── App.tsx               # Главный компонент чата
 │   ├── App.css               # Стили
 │   └── assets/               # Иконки и изображения
-└── vite.config.ts            # Конфигурация Vite
+├── vite.config.ts            # Конфигурация Vite
+└── Dockerfile                # Docker образ
 ```
 
 ### Поток обработки запроса
 
 ```
-           ┌─────────────┐
-           │   Вопрос    │
-           │пользователя │
-           └──────┬──────┘
-                  │
-                  ▼
-    ┌─────────────────────────────┐
-    │  1. Определение намерения   │
-    │  (TRADE/SECURITIES/GENERAL) │
-    └─────────────┬───────────────┘
-                  │
-    ┌─────────────┼─────────────┐
-    │             │             │
-    ▼             ▼             ▼
-┌──────┐    ┌──────────┐   ┌─────────┐
-│TRADE │    │SECURITIES│   │ GENERAL │
-└──┬───┘    └────┬─────┘   └────┬────┘
-   │             │              │
-   │     ┌───────┴────────┐     │
-   │     │  Tinkoff API   │     │
-   │     │                │     │
-   │     └───────┬────────┘     │
-   │             │              │
-   └─────────────┼──────────────┘
-                 ▼
-         ┌───────────────┐
-         │      LLM      │
-         │   Генерация   │
-         └───────┬───────┘
-                 ▼
-         ┌───────────────┐
-         │    Ответ +    │
-         │  Сохранение   │
-         │   в историю   │
-         └───────────────┘
+                ┌─────────────┐
+                │   Вопрос    │
+                │пользователя │
+                └──────┬──────┘
+                       │
+                       ▼
+     ┌──────────────────────────────────┐
+     │  Определение намерения через LLM │
+     │     (TRADE/SECURITIES/GENERAL)   │
+     └─────────────────┬────────────────┘
+                       │
+        ┌──────────────┼──────────────────┐
+        │              │                  │
+        ▼              ▼                  ▼
+    ┌──────┐       ┌──────────┐      ┌─────────┐
+    │TRADE │       │SECURITIES│      │ GENERAL │
+    └──┬───┘       └────┬─────┘      └────┬────┘
+       │                │                 │
+       │                │                 │
+       ▼                ▼                 ▼
+   ┌──────────┐ ┌─────────────────┐  ┌─────────┐
+   │ Tinkoff  │ │  Tinkoff API    │  │         │
+   │   API    │ │(рыночные данные,│  │   RAG   │
+   │(торговля)│ │портфель и данные│  │ Система │
+   │          │ │о пользователе)  │  │         │
+   └────┬─────┘ └───────┬─────────┘  └────┬────┘
+        │               │                 │
+        └───────────────┼─────────────────┘
+                        ▼
+                ┌───────────────┐
+                │      LLM      │
+                │   Генерация   │
+                │     ответа    │
+                └───────┬───────┘
+                        ▼
+                ┌───────────────┐
+                │    Ответ +    │
+                │  Сохранение   │
+                │   в историю   │
+                └───────────────┘
 ```
+
+**Пояснение:**
+- **TRADE** → Tinkoff API для выполнения торговых операций (покупка/продажа)
+- **SECURITIES** → Tinkoff API для получения рыночных данных, портфеля пользователя и его предпочтений
+- **GENERAL** → RAG-система для поиска информации в базе знаний
 
 ---
 
@@ -138,14 +188,78 @@ frontend/
 
 ## 🚀 Быстрый старт
 
-### 1. Клонирование репозитория
+### Вариант 1: Docker
+
+#### 1. Клонирование репозитория
 
 ```bash
 git clone https://github.com/altrest105/FinanceAgent.git
 cd FinanceAgent
 ```
 
-### 2. Настройка Backend
+#### 2. Создайте `.env` файл в корне проекта:
+
+```env
+SECRET_KEY="django-insecure-$g&!jkxrz!z35)u$ip(8rvti!f%tk3x_(eb)gm)-x)frp)9e2b"
+ENCRYPTION_KEY="zaizwddTH69_9txJ8i5XHj9rEZHWFnWLH27LNjYUfkk="
+AGENT_LOG_LEVEL="DEBUG"
+DEBUG="True"
+
+LLM_API_KEY="sk-or-v1-********"
+LLM_BASE_URL="https://openrouter.ai/api/v1"
+LLM_MODEL="openai/gpt-5.1"
+LLM_MAX_TOKENS="8000"
+
+EMBEDDER_MODEL="BAAI/bge-m3"
+RERANKER_MODEL="BAAI/bge-reranker-v2-m3"
+
+TOP_K="3"
+TOP_K_BEFORE_RERANK="20"
+BATCH_SIZE="100"
+USE_RAG="0"
+```
+
+#### 3. Запустите контейнеры:
+
+```bash
+docker-compose up -d
+```
+
+Приложение будет доступно:
+- **Frontend**: `http://localhost:5173`
+- **Backend API**: `http://localhost:8000`
+
+#### 4. Остановка контейнеров:
+
+```bash
+docker-compose down
+```
+
+#### 5. Просмотр логов:
+
+```bash
+# Все сервисы
+docker-compose logs -f
+
+# Только backend
+docker-compose logs -f backend
+
+# Только frontend
+docker-compose logs -f frontend
+```
+
+---
+
+### Вариант 2: Локальная установка
+
+#### 1. Клонирование репозитория
+
+```bash
+git clone https://github.com/altrest105/FinanceAgent.git
+cd FinanceAgent
+```
+
+#### 2. Настройка Backend
 
 #### Создайте `.env` файл в корне проекта:
 
