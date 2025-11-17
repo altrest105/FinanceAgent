@@ -35,6 +35,44 @@
 
 ## 🏗️ Архитектура
 
+### Структура проекта
+```
+FinanceAgent/
+├── backend/
+│   ├── agent/                     # Основное приложение
+│   │   ├── models.py              # БД модели (профиль, история диалогов)
+│   │   ├── views.py               # API endpoints
+│   │   ├── orchestrator.py        # Главный оркестратор запросов
+│   │   ├── services/
+│   │   │   ├── memorybank.py      # Управление профилем и историей
+│   │   │   ├── rag.py             # RAG-система (эмбеддинги, поиск)
+│   │   │   └── tinvest.py         # Tinkoff Invest API
+│   │   └── management/
+│   │       └── commands/
+│   │           └── init_demo_user.py  # Создание демо-пользователя
+│   ├── files/
+│   │   ├── train_data.csv         # Исходная база знаний
+│   │   └── hf_cache/              # Кэш HuggingFace моделей
+│   ├── backend/
+│   │   └── settings.py            # Конфигурация Django
+│   ├── requirements.txt           # Python зависимости
+│   └── Dockerfile                 # Docker образ для backend
+│
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx               # Главный компонент чата
+│   │   ├── App.css               # Стили
+│   │   └── assets/               # Иконки и изображения
+│   ├── vite.config.ts            # Конфигурация Vite
+│   ├── package.json              # Node.js зависимости
+│   └── Dockerfile                # Docker образ для frontend
+│
+├── docker-compose.yml            # Оркестрация контейнеров
+├── .env                          # Переменные окружения
+├── readme.md                     # Документация
+└── requirements.txt              # Зависимости python
+```
+
 ### Backend (Django)
 ```
 backend/
@@ -52,8 +90,9 @@ backend/
 ├── files/
 │   ├── train_data.csv         # Исходная база знаний
 │   └── hf_cache/              # Кэш HuggingFace моделей
-└── backend/
-    └── settings.py            # Конфигурация Django
+├── backend/
+│   └── settings.py            # Конфигурация Django
+└── Dockerfile                 # Docker образ
 ```
 
 ### Frontend (React + TypeScript)
@@ -63,7 +102,8 @@ frontend/
 │   ├── App.tsx               # Главный компонент чата
 │   ├── App.css               # Стили
 │   └── assets/               # Иконки и изображения
-└── vite.config.ts            # Конфигурация Vite
+├── vite.config.ts            # Конфигурация Vite
+└── Dockerfile                # Docker образ
 ```
 
 ### Поток обработки запроса
